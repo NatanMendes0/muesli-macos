@@ -5,7 +5,7 @@
 
 **The open-source meeting notepad.** Granola-style AI meeting notes — your mic, your Mac, your models, your files.
 
-Muesli records both sides of any call **without a bot joining the meeting**, transcribes it **locally** with Whisper, lets you type rough notes while you talk, and then blends your fragments with the transcript into polished notes using Claude or a fully-local Ollama model.
+Muesli records both sides of a call **without a bot joining the meeting**, lets you type rough notes while you talk, and organizes meetings into user-created categories. Transcription can run locally with Whisper or through Groq, OpenAI, or OpenRouter; optional AI providers can then turn notes and transcript into polished minutes.
 
 > Granola is a lovely product. It is also closed-source, subscription-priced, and your meetings live on someone else's servers. Muesli is the muesli to their granola: the same breakfast, but you can see every ingredient.
 
@@ -25,24 +25,27 @@ flowchart LR
 
 - **No bot in the call.** System audio is captured from macOS itself via ScreenCaptureKit, so Muesli works with Zoom, Meet, Teams, Slack huddles, phone calls through the Mac — anything that makes sound.
 - **Speaker attribution for free.** Your mic is `Me`, system audio is `Them`. Two streams, transcribed separately, interleaved by time.
-- **Local-first.** Audio and transcripts never leave the Mac. The only network call is the optional ✨ Enhance / Ask step — and even that can stay local via Ollama.
+- **Privacy is explicit.** Local Whisper keeps audio on the Mac. Cloud transcription sends audio chunks to the selected speech provider; the app displays the active capture, transcription, fallback, and automatic-enhancement behavior while recording. ✨ Enhance / Ask can send meeting text to a cloud AI provider, or stay local via Ollama.
+- **Organized by category.** Create as many categories as you need, move meetings between them, and use the **+** beside a category to create and start a new recording directly inside it.
 - **Plain files.** Every meeting is a folder of `meeting.json`, `notes.md`, `transcript.md`, `enhanced.md`, `mic.wav`, `system.wav`. No lock-in; `grep` works.
 
 ## Quick start
 
 ```bash
-brew install whisper-cpp
+brew install whisper-cpp # only when using local Whisper
 git clone <your-fork-or-path>/muesli && cd muesli
 make run
 ```
 
-First launch shows a five-item checklist:
+First launch shows a setup checklist:
 
 1. **Microphone** — one click.
 2. **System audio** — macOS gates this behind *Privacy & Security → Screen & System Audio Recording*. Enable Muesli there, then relaunch. (Audio-only capture still requires the screen-recording permission; that's a macOS design decision, not ours.)
-3. **Whisper engine** — found automatically if installed via Homebrew.
-4. **Speech model** — one-click download (base.en, 142 MB, recommended).
-5. **AI provider** *(optional)* — paste an Anthropic API key (stored in your Keychain) or point at Ollama. Only needed for ✨ Enhance and Ask; recording and transcription are fully local.
+3. **Whisper engine** — found automatically if installed via Homebrew; optional when using cloud STT without local fallback.
+4. **Speech model** — one-click download (base.en, 142 MB, recommended for local transcription or fallback).
+5. **AI provider** *(optional)* — configure Groq, Gemini, OpenAI/compatible APIs, Anthropic, or Ollama. Cloud providers receive meeting text when you use ✨ Enhance or Ask; Ollama can keep those requests local.
+
+During recording, Muesli displays whether capture includes microphone and system audio, whether transcription is local or sends audio to a cloud provider, whether local fallback is enabled, and whether automatic enhancement will send text to an AI provider. Muesli captures audio only; it does not save screen video.
 
 Then hit **Start meeting**, talk, type fragments, hit **Stop**, hit **✨ Enhance**.
 
@@ -58,8 +61,14 @@ Then hit **Start meeting**, talk, type fragments, hit **Stop**, hit **✨ Enhanc
 
 | Provider | Setup | Notes |
 |---|---|---|
-| **Claude** (default) | API key in Settings → AI | Default model `claude-sonnet-5`; `claude-opus-5` and `claude-haiku-4-5` selectable. Key lives in the macOS Keychain. |
-| **Ollama** | Run Ollama, pull a model | Fully local. Long transcripts are truncated to fit small context windows. |
+| **Automatic** | Configure one or more providers | Tries configured providers in this order: Groq, Gemini, Anthropic, OpenAI, then Ollama. |
+| **Groq** | API key in Settings → Modelos de IA | OpenAI-compatible chat API; multiple keys rotate automatically. |
+| **Google Gemini** | API key in Settings → Modelos de IA | Gemini `generateContent` API; multiple keys rotate automatically. |
+| **OpenAI / compatible** | API key and base URL in Settings → Modelos de IA | Supports OpenAI-compatible endpoints, including local or proxy endpoints. |
+| **Anthropic Claude** | API key in Settings → Modelos de IA | Uses the Anthropic Messages API; multiple keys rotate automatically. |
+| **Ollama** | Run Ollama and select a model | Local chat endpoint. Long transcripts are shortened to fit the prompt budget. |
+
+For speech transcription, the available engines are local Whisper, Groq, OpenAI, and OpenRouter. Cloud STT uploads audio chunks to the selected provider; local Whisper can be enabled as a fallback.
 
 ## Whisper models
 
@@ -85,14 +94,17 @@ Sources/Muesli/
 ├── Transcription/
 │   ├── WhisperTranscriber   whisper-cli wrapper (JSON out, prompt-chaining, artifact filter)
 │   ├── TranscriptionPipeline serial actor: chunk queue → segments → store
+│   ├── CloudTranscriber     Groq/OpenAI/OpenRouter speech API and chunk batching
 │   └── WhisperModels        model catalog + downloader
 ├── Enhance/
-│   ├── Enhancer             Anthropic Messages API + Ollama clients, prompts
+│   ├── Enhancer             Groq/Gemini/OpenAI/Anthropic/Ollama clients, prompts
 │   └── Templates            note structures (Auto, 1:1, Sales, …)
 ├── Storage/MeetingStore     JSON source of truth + .md mirrors, Trash-based delete
 ├── UI/                      SwiftUI: sidebar, tabs, live record bar, setup, settings
 └── Support/                 settings, keychain, permissions, hidden CLI
 ```
+
+Category definitions are stored in `categories.json`; each meeting stores its category ID in `meeting.json`. Older meeting files without a category remain valid and appear under **Sem categoria**.
 
 Zero package dependencies — Apple frameworks plus the `whisper-cli` binary.
 

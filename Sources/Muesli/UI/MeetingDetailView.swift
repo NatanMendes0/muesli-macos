@@ -102,6 +102,19 @@ struct MeetingDetailView: View {
 
             Spacer()
 
+            Picker("Categoria", selection: Binding<UUID?>(
+                get: { m.categoryID },
+                set: { store.moveMeeting(meetingID, to: $0) }
+            )) {
+                Text("Sem categoria").tag(Optional<UUID>.none)
+                ForEach(store.categories) { category in
+                    Text(category.name).tag(Optional(category.id))
+                }
+            }
+            .labelsHidden()
+            .frame(maxWidth: 145)
+            .help("Organizar reunião por categoria")
+
             // Template picker
             Picker("", selection: Binding(
                 get: { m.templateID },

@@ -11,6 +11,12 @@ struct SidebarView: View {
     let onOpenSetup: () -> Void
 
     @State private var confirmDelete: Meeting?
+    @State private var confirmDeleteCategory: MeetingCategory?
+    @State private var showNewCategory = false
+    @State private var newCategoryName = ""
+    @State private var categoryToRename: MeetingCategory?
+    @State private var renamedCategoryName = ""
+    @AppStorage("collapsedMeetingCategoryIDs") private var collapsedCategoryIDsRaw = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -119,44 +125,41 @@ struct SidebarView: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
 
+            HStack {
+                Text("CATEGORIAS")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .foregroundStyle(CoastalTheme.faintText)
+                Spacer()
+                Button {
+                    newCategoryName = ""
+                    showNewCategory = true
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(CoastalTheme.secondaryText)
+                        .frame(width: 22, height: 22)
+                        .background(CoastalTheme.surface, in: RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(CoastalTheme.separator, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .help("Criar categoria")
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 4)
+
             // Meeting list
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if groupedMeetings.isEmpty {
+                    if filtered.isEmpty {
                         Text(searchText.isEmpty ? "Nenhuma reunião ainda." : "Sem resultados.")
                             .font(.caption)
                             .foregroundStyle(CoastalTheme.faintText)
                             .padding(.horizontal, 14)
                             .padding(.top, 20)
-                    } else {
-                        ForEach(groupedMeetings, id: \.0) { section, items in
-                            Text(section)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(CoastalTheme.faintText)
-                                .textCase(.uppercase)
-                                .padding(.horizontal, 14)
-                                .padding(.top, 10)
-                                .padding(.bottom, 3)
-
-                            ForEach(items) { m in
-                                SidebarRow(
-                                    meeting: m,
-                                    isSelected: selectedMeetingID == m.id,
-                                    isRecording: recorder.recordingMeetingID == m.id
-                                ) {
-                                    selectedMeetingID = m.id
-                                }
-                                .contextMenu {
-                                    Button("Abrir pasta no Finder") {
-                                        NSWorkspace.shared.activateFileViewerSelecting([store.folder(for: m)])
-                                    }
-                                    Divider()
-                                    Button("Excluir reunião", role: .destructive) {
-                                        confirmDelete = m
-                                    }
-                                }
-                            }
-                        }
+                    }
+                    categorySection(nil)
+                    ForEach(store.categories) { category in
+                        categorySection(category)
                     }
                 }
                 .padding(.bottom, 12)
@@ -248,6 +251,150 @@ struct SidebarView: View {
             }
             Button("Cancelar", role: .cancel) {}
         }
+        .confirmationDialog(
+            "Excluir a categoria “\(confirmDeleteCategory?.name ?? "")”?",
+            isPresented: Binding(
+                get: { confirmDeleteCategory != nil },
+                set: { if !$0 { confirmDeleteCategory = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Excluir categoria", role: .destructive) {
+                if let category = confirmDeleteCategory { store.deleteCategory(category.id) }
+                confirmDeleteCategory = nil
+            }
+            Button("Cancelar", role: .cancel) { confirmDeleteCategory = nil }
+        } message: {
+            Text("As reuniões dessa categoria serão mantidas em “Sem categoria”.")
+        }
+        .alert("Nova categoria", isPresented: $showNewCategory) {
+            TextField("Nome da categoria", text: $newCategoryName)
+            Button("Criar") {
+                _ = store.createCategory(name: newCategoryName)
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Crie categorias como Trabalho, Escola ou Projetos para organizar suas reuniões.")
+        }
+        .alert("Renomear categoria", isPresented: Binding(
+            get: { categoryToRename != nil },
+            set: { if !$0 { categoryToRename = nil } }
+        )) {
+            TextField("Nome da categoria", text: $renamedCategoryName)
+            Button("Salvar") {
+                if let categoryToRename {
+                    _ = store.renameCategory(categoryToRename.id, name: renamedCategoryName)
+                }
+                categoryToRename = nil
+            }
+            Button("Cancelar", role: .cancel) { categoryToRename = nil }
+        }
+    }
+
+    @ViewBuilder
+    private func categorySection(_ category: MeetingCategory?) -> some View {
+        let items = filtered.filter { $0.categoryID == category?.id }
+        let categoryKey = category?.id.uuidString ?? "uncategorized"
+        let isCollapsed = CollapsedCategoryPreferences.decode(collapsedCategoryIDsRaw).contains(categoryKey)
+        if category == nil || !items.isEmpty || searchText.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.16)) {
+                            collapsedCategoryIDsRaw = CollapsedCategoryPreferences.toggle(
+                                categoryKey,
+                                in: collapsedCategoryIDsRaw
+                            )
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                                .font(.system(size: 9, weight: .bold))
+                            Text(category?.name ?? "Sem categoria")
+                                .font(.system(size: 11, weight: .semibold))
+                                .textCase(.uppercase)
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(CoastalTheme.faintText)
+                    }
+                    .buttonStyle(.plain)
+                    .help(isCollapsed ? "Expandir categoria" : "Recolher categoria")
+                    .accessibilityLabel("\(isCollapsed ? "Expandir" : "Recolher") categoria \(category?.name ?? "Sem categoria")")
+                    Spacer(minLength: 0)
+                    if let category {
+                        Button {
+                            Task {
+                                if let id = await recorder.startNewMeeting(categoryID: category.id) {
+                                    selectedMeetingID = id
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "plus")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(CoastalTheme.accent)
+                                .frame(width: 21, height: 21)
+                                .background(CoastalTheme.surface, in: RoundedRectangle(cornerRadius: 5))
+                                .overlay(RoundedRectangle(cornerRadius: 5).stroke(CoastalTheme.separator, lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(recorder.isRecording)
+                        .help("Criar reunião gravada em \(category.name)")
+
+                        Menu {
+                            Button("Renomear…") {
+                                renamedCategoryName = category.name
+                                categoryToRename = category
+                            }
+                            Button("Excluir categoria…", role: .destructive) {
+                                confirmDeleteCategory = category
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(CoastalTheme.faintText)
+                                .frame(width: 18, height: 20)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, 9)
+                .padding(.bottom, 2)
+
+                if !isCollapsed || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ForEach(items) { meeting in
+                        meetingRow(meeting)
+                    }
+                }
+            }
+        }
+    }
+
+    private func meetingRow(_ meeting: Meeting) -> some View {
+        SidebarRow(
+            meeting: meeting,
+            isSelected: selectedMeetingID == meeting.id,
+            isRecording: recorder.recordingMeetingID == meeting.id
+        ) {
+            selectedMeetingID = meeting.id
+        }
+        .contextMenu {
+            Button("Abrir pasta no Finder") {
+                NSWorkspace.shared.activateFileViewerSelecting([store.folder(for: meeting)])
+            }
+            Menu("Mover para categoria") {
+                Button("Sem categoria") { store.moveMeeting(meeting.id, to: nil) }
+                ForEach(store.categories) { category in
+                    Button(category.name) { store.moveMeeting(meeting.id, to: category.id) }
+                }
+            }
+            Divider()
+            Button("Excluir reunião", role: .destructive) {
+                confirmDelete = meeting
+            }
+        }
     }
 
     private var filtered: [Meeting] {
@@ -255,40 +402,13 @@ struct SidebarView: View {
         guard !q.isEmpty else { return store.meetings }
         return store.meetings.filter { m in
             m.title.lowercased().contains(q)
+                || (store.categories.first(where: { $0.id == m.categoryID })?.name.lowercased().contains(q) ?? false)
                 || m.notesMD.lowercased().contains(q)
                 || (m.enhancedMD?.lowercased().contains(q) ?? false)
                 || m.transcript.contains { $0.text.lowercased().contains(q) }
         }
     }
 
-    private var groupedMeetings: [(String, [Meeting])] {
-        let cal = Calendar.current
-        var buckets: [(String, [Meeting])] = []
-        var index: [String: Int] = [:]
-        let monthFormatter = DateFormatter()
-        monthFormatter.locale = Locale(identifier: "pt_BR")
-        monthFormatter.dateFormat = "MMMM 'de' yyyy"
-
-        for m in filtered {
-            let label: String
-            if cal.isDateInToday(m.createdAt) {
-                label = "Hoje"
-            } else if cal.isDateInYesterday(m.createdAt) {
-                label = "Ontem"
-            } else if let weekAgo = cal.date(byAdding: .day, value: -7, to: Date()), m.createdAt > weekAgo {
-                label = "Esta semana"
-            } else {
-                label = monthFormatter.string(from: m.createdAt).capitalized
-            }
-            if let i = index[label] {
-                buckets[i].1.append(m)
-            } else {
-                index[label] = buckets.count
-                buckets.append((label, [m]))
-            }
-        }
-        return buckets
-    }
 }
 
 private struct SidebarRow: View {

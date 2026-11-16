@@ -31,9 +31,10 @@ struct ContentView: View {
                     HStack {
                         if let consent = consentNoticeText {
                             Label(consent, systemImage: "info.circle")
-                                .font(.caption2)
+                                .font(.system(size: 10.5))
                                 .foregroundStyle(CoastalTheme.secondaryText)
-                                .lineLimit(1)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer()
                         Text("Feito por Natan Mendes 🤖")
@@ -145,9 +146,25 @@ struct ContentView: View {
     }
 
     private var consentNoticeText: String? {
-        guard recorder.isRecording, settings.showConsentNotice else { return nil }
+        guard recorder.isRecording else { return nil }
         let s = settings.consentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
-        return s.isEmpty ? nil : s
+        let provider = settings.hasAIConfigured ? settings.resolvedActiveProvider() : nil
+        let openAIHost = URLComponents(string: settings.openAIBaseURL)?.host?.lowercased()
+        let aiProviderIsLocal = provider == .openai
+            && ["localhost", "127.0.0.1", "::1"].contains(openAIHost ?? "")
+        let technical = RecordingPrivacyNotice.text(
+            sttEngine: settings.sttEngine,
+            cloudFallback: settings.sttCloudFallback,
+            cloudSTTConfigured: settings.sttEngine == .local || !settings.resolvedSTTKeys().isEmpty,
+            systemAudio: settings.captureSystemAudio && recorder.systemAudioWarning == nil,
+            automaticEnhancement: settings.autoEnhanceOnStop && settings.hasAIConfigured,
+            aiProvider: provider,
+            aiProviderIsLocal: aiProviderIsLocal
+        )
+        return [settings.showConsentNotice ? s : nil, technical]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
     }
 }
 

@@ -14,6 +14,16 @@ enum Speaker: String, Codable {
     }
 }
 
+struct MeetingCategory: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var name: String
+
+    init(id: UUID = UUID(), name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
 struct TranscriptSegment: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var speaker: Speaker
@@ -43,12 +53,13 @@ struct Meeting: Identifiable, Codable, Equatable {
     /// Folder name inside the meetings directory. Stable for the meeting's lifetime.
     var folderName: String
     var isManualTitle: Bool = false
+    var categoryID: UUID?
 
     init(id: UUID = UUID(), title: String, createdAt: Date = Date(),
          durationSeconds: Double = 0, templateID: String = "auto",
          notesMD: String = "", enhancedMD: String? = nil,
          transcript: [TranscriptSegment] = [], chat: [ChatMessage] = [],
-         folderName: String, isManualTitle: Bool = false) {
+         folderName: String, isManualTitle: Bool = false, categoryID: UUID? = nil) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
@@ -60,10 +71,11 @@ struct Meeting: Identifiable, Codable, Equatable {
         self.chat = chat
         self.folderName = folderName
         self.isManualTitle = isManualTitle
+        self.categoryID = categoryID
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, durationSeconds, templateID, notesMD, enhancedMD, transcript, chat, folderName, isManualTitle
+        case id, title, createdAt, durationSeconds, templateID, notesMD, enhancedMD, transcript, chat, folderName, isManualTitle, categoryID
     }
 
     init(from decoder: Decoder) throws {
@@ -79,6 +91,7 @@ struct Meeting: Identifiable, Codable, Equatable {
         chat = try c.decodeIfPresent([ChatMessage].self, forKey: .chat) ?? []
         folderName = try c.decode(String.self, forKey: .folderName)
         isManualTitle = try c.decodeIfPresent(Bool.self, forKey: .isManualTitle) ?? false
+        categoryID = try c.decodeIfPresent(UUID.self, forKey: .categoryID)
     }
 
     var hasTranscript: Bool { !transcript.isEmpty }

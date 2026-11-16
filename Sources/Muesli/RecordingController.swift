@@ -72,10 +72,12 @@ final class RecordingController: ObservableObject {
     // MARK: - Start / stop
 
     /// Creates a meeting and starts recording into it.
-    func startNewMeeting(captureSystemAudio: Bool? = nil) async {
-        guard !isRecording else { return }
-        let meeting = store.createMeeting()
+    @discardableResult
+    func startNewMeeting(captureSystemAudio: Bool? = nil, categoryID: UUID? = nil) async -> UUID? {
+        guard !isRecording else { return nil }
+        let meeting = store.createMeeting(categoryID: categoryID)
         await start(meetingID: meeting.id, captureSystemAudio: captureSystemAudio)
+        return meeting.id
     }
 
     func start(meetingID: UUID, captureSystemAudio: Bool? = nil) async {

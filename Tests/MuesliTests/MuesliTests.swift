@@ -168,6 +168,7 @@ import Foundation
         let decoded = try JSONDecoder.muesli.decode(Meeting.self, from: Data(legacyJSON.utf8))
         #expect(decoded.title == "Antiga")
         #expect(decoded.isManualTitle == false)
+        #expect(decoded.categoryID == nil)
     }
 
     @Test func updateVersionComparison() {
@@ -220,5 +221,73 @@ import Foundation
         data: [DONE]
         """
         #expect(Enhancer.extractOpenAIStyleContent(from: Data(sse.utf8)) == "Conexão OK")
+    }
+}
+
+@Suite struct CategoryAndPrivacyTests {
+    @MainActor
+    @Test func categoriesOrganizeMeetingsAndDeletingCategoryUnassignsThem() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-categories-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        let store = MeetingStore(baseDir: base)
+        let category = try #require(store.createCategory(name: "Projeto 1"))
+        #expect(store.createCategory(name: "  ") == nil)
+        #expect(store.createCategory(name: "projeto 1") == nil)
+        let meeting = store.createMeeting(title: "Alinhamento", categoryID: category.id)
+
+        #expect(store.meeting(meeting.id)?.categoryID == category.id)
+        let reloaded = MeetingStore(baseDir: base)
+        #expect(reloaded.categories.contains(category))
+        #expect(reloaded.meeting(meeting.id)?.categoryID == category.id)
+
+        store.deleteCategory(category.id)
+        #expect(store.meeting(meeting.id)?.categoryID == nil)
+        let afterDelete = MeetingStore(baseDir: base)
+        #expect(afterDelete.categories.isEmpty)
+        #expect(afterDelete.meeting(meeting.id)?.categoryID == nil)
+    }
+
+    @Test func privacyNoticeMatchesSelectedTranscriptionEngine() {
+        let local = RecordingPrivacyNotice.text(sttEngine: .local, cloudFallback: false,
+            systemAudio: true, automaticEnhancement: false, aiProvider: nil)
+        #expect(local.contains("localmente"))
+        #expect(local.contains("sem vídeo"))
+
+        let cloud = RecordingPrivacyNotice.text(sttEngine: .groq, cloudFallback: false,
+            systemAudio: true, automaticEnhancement: false, aiProvider: nil)
+        #expect(cloud.contains("Groq"))
+        #expect(cloud.contains("enviados"))
+
+        let noCloudKey = RecordingPrivacyNotice.text(sttEngine: .groq, cloudFallback: true,
+            cloudSTTConfigured: false, systemAudio: true, automaticEnhancement: false, aiProvider: nil)
+        #expect(noCloudKey.contains("o áudio não será enviado a um provedor"))
+
+        let fallback = RecordingPrivacyNotice.text(sttEngine: .openrouter, cloudFallback: true,
+            systemAudio: true, automaticEnhancement: true, aiProvider: .ollama)
+        #expect(fallback.contains("Whisper local será usado como reserva"))
+        #expect(fallback.contains("Ollama local"))
+
+        let cloudAI = RecordingPrivacyNotice.text(sttEngine: .local, cloudFallback: false,
+            systemAudio: false, automaticEnhancement: true, aiProvider: .groq)
+        #expect(cloudAI.contains("provedor de IA (Groq"))
+
+        let localAI = RecordingPrivacyNotice.text(sttEngine: .local, cloudFallback: false,
+            systemAudio: false, automaticEnhancement: true, aiProvider: .openai, aiProviderIsLocal: true)
+        #expect(localAI.contains("endpoint local de IA"))
+    }
+}
+
+@Suite struct CategoryCollapseTests {
+    @Test func collapsePreferencesPersistMultipleCategoryIDsAndToggleIndividually() {
+        let firstID = UUID().uuidString
+        let secondID = UUID().uuidString
+        let raw = CollapsedCategoryPreferences.encode([firstID, secondID])
+        let collapsed = CollapsedCategoryPreferences.toggle(firstID, in: raw)
+
+        #expect(CollapsedCategoryPreferences.decode(raw) == [firstID, secondID])
+        #expect(CollapsedCategoryPreferences.decode(collapsed) == [secondID])
+        #expect(CollapsedCategoryPreferences.decode(CollapsedCategoryPreferences.toggle(firstID, in: collapsed)) == [firstID, secondID])
     }
 }

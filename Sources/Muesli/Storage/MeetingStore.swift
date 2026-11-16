@@ -16,6 +16,7 @@ import SwiftUI
 @MainActor
 final class MeetingStore: ObservableObject {
     @Published private(set) var meetings: [Meeting] = []
+    @Published private(set) var categories: [MeetingCategory] = []
 
     let baseDir: URL
     let meetingsDir: URL
@@ -29,6 +30,7 @@ final class MeetingStore: ObservableObject {
         // launch-time loading and all later writes target the real directory.
         self.meetingsDir = configuredMeetingsDir.resolvingSymlinksInPath()
         try? FileManager.default.createDirectory(at: meetingsDir, withIntermediateDirectories: true)
+        loadCategories()
         load()
         seedWelcomeIfFirstRun()
     }
@@ -83,7 +85,7 @@ final class MeetingStore: ObservableObject {
     // MARK: - Mutations
 
     @discardableResult
-    func createMeeting(title: String? = nil, templateID: String = "auto") -> Meeting {
+    func createMeeting(title: String? = nil, templateID: String = "auto", categoryID: UUID? = nil) -> Meeting {
         let id = UUID()
         let now = Date()
         let meeting = Meeting(
@@ -91,11 +93,53 @@ final class MeetingStore: ObservableObject {
             title: title ?? Meeting.defaultTitle(for: now),
             createdAt: now,
             templateID: templateID,
-            folderName: Meeting.makeFolderName(for: now, id: id)
+            folderName: Meeting.makeFolderName(for: now, id: id),
+            categoryID: categories.contains(where: { $0.id == categoryID }) ? categoryID : nil
         )
         meetings.insert(meeting, at: 0)
         persist(meeting)
         return meeting
+    }
+
+    @discardableResult
+    func createCategory(name: String) -> MeetingCategory? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !categories.contains(where: { $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame })
+        else { return nil }
+        let category = MeetingCategory(name: trimmed)
+        categories.append(category)
+        sortCategories()
+        persistCategories()
+        return category
+    }
+
+    func renameCategory(_ id: UUID, name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              !categories.contains(where: { $0.id != id && $0.name.localizedCaseInsensitiveCompare(trimmed) == .orderedSame }),
+              let index = categories.firstIndex(where: { $0.id == id })
+        else { return false }
+        categories[index].name = trimmed
+        sortCategories()
+        persistCategories()
+        return true
+    }
+
+    func deleteCategory(_ id: UUID) {
+        guard categories.contains(where: { $0.id == id }) else { return }
+        categories.removeAll { $0.id == id }
+        persistCategories()
+        for var meeting in meetings where meeting.categoryID == id {
+            meeting.categoryID = nil
+            update(meeting)
+        }
+    }
+
+    func moveMeeting(_ meetingID: UUID, to categoryID: UUID?) {
+        guard var meeting = meeting(meetingID) else { return }
+        meeting.categoryID = categoryID.flatMap { id in categories.contains(where: { $0.id == id }) ? id : nil }
+        update(meeting)
     }
 
     func update(_ meeting: Meeting) {
@@ -192,6 +236,31 @@ final class MeetingStore: ObservableObject {
         if meeting.hasTranscript {
             let md = MeetingStore.transcriptMarkdown(meeting)
             try? md.write(to: folder.appendingPathComponent("transcript.md"), atomically: true, encoding: .utf8)
+        }
+    }
+
+    private var categoriesURL: URL {
+        baseDir.appendingPathComponent("categories.json")
+    }
+
+    private func loadCategories() {
+        guard let data = try? Data(contentsOf: categoriesURL),
+              let decoded = try? JSONDecoder().decode([MeetingCategory].self, from: data) else { return }
+        categories = decoded
+        sortCategories()
+    }
+
+    private func sortCategories() {
+        categories.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func persistCategories() {
+        do {
+            try FileManager.default.createDirectory(at: baseDir, withIntermediateDirectories: true)
+            let data = try JSONEncoder().encode(categories)
+            try data.write(to: categoriesURL, options: .atomic)
+        } catch {
+            NSLog("Muesli: could not persist categories: %@", String(describing: error))
         }
     }
 

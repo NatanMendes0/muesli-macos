@@ -1109,9 +1109,12 @@ private struct RecordingSettingsTab: View {
 
             Toggle(isOn: $settings.showConsentNotice) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Exibir lembrete de consentimento ao gravar")
+                    Text("Exibir lembrete personalizado ao gravar")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(CoastalTheme.text)
+                    Text("O aviso técnico sobre captura, transcrição local/nuvem e envio para IA continua visível durante a gravação.")
+                        .font(.caption)
+                        .foregroundStyle(CoastalTheme.secondaryText)
                 }
             }
             if settings.showConsentNotice {

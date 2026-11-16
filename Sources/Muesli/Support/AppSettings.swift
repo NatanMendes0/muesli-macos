@@ -75,6 +75,66 @@ enum AIProvider: String, CaseIterable, Identifiable {
     }
 }
 
+enum RecordingPrivacyNotice {
+    static func text(
+        sttEngine: STTEngine,
+        cloudFallback: Bool,
+        cloudSTTConfigured: Bool = true,
+        systemAudio: Bool,
+        automaticEnhancement: Bool,
+        aiProvider: AIProvider?,
+        aiProviderIsLocal: Bool = false
+    ) -> String {
+        var parts = [systemAudio
+            ? "Captura configurada: microfone e áudio do sistema (sem vídeo)."
+            : "Captura configurada: somente microfone (sem vídeo)."]
+
+        switch sttEngine {
+        case .local:
+            parts.append("Transcrição processada localmente com Whisper; o áudio fica neste Mac.")
+        case .groq, .openai, .openrouter:
+            if cloudSTTConfigured {
+                var detail = "Transcrição na nuvem via \(sttEngine.shortLabel): os blocos de áudio são enviados a esse provedor."
+                if cloudFallback {
+                    detail += " Se a API falhar, o Whisper local será usado como reserva."
+                }
+                parts.append(detail)
+            } else if cloudFallback {
+                parts.append("Nenhuma chave de STT na nuvem está configurada; o áudio não será enviado a um provedor e o app tentará Whisper local como reserva.")
+            } else {
+                parts.append("Nenhuma chave de STT na nuvem está configurada; a transcrição não funcionará até configurar uma chave ou selecionar Whisper local.")
+            }
+        }
+
+        if automaticEnhancement, aiProviderIsLocal {
+            parts.append("Ao parar, o endpoint local de IA gerará a ata automaticamente; o texto permanece neste Mac.")
+        } else if automaticEnhancement, aiProvider == .ollama {
+            parts.append("Ao parar, o Ollama local gerará a ata automaticamente; o texto permanece neste Mac.")
+        } else if automaticEnhancement, let aiProvider {
+            parts.append("Ao parar, a transcrição e as notas serão enviadas ao provedor de IA (\(aiProvider.label)) para gerar a ata automaticamente.")
+        }
+        return parts.joined(separator: " ")
+    }
+}
+
+enum CollapsedCategoryPreferences {
+    static func decode(_ rawValue: String) -> Set<String> {
+        Set(rawValue.split(separator: ",").map(String.init))
+    }
+
+    static func encode(_ categoryIDs: Set<String>) -> String {
+        categoryIDs.sorted().joined(separator: ",")
+    }
+
+    static func toggle(_ categoryID: String, in rawValue: String) -> String {
+        var categoryIDs = decode(rawValue)
+        if !categoryIDs.insert(categoryID).inserted {
+            categoryIDs.remove(categoryID)
+        }
+        return encode(categoryIDs)
+    }
+}
+
 /// Persistent preferences. Everything non-secret lives in UserDefaults;
 /// API key lists live in the macOS Keychain.
 @MainActor
@@ -97,7 +157,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("vpKnownBad") var vpKnownBad: Bool = false
     @AppStorage("captureSystemAudio") var captureSystemAudio: Bool = true
     @AppStorage("showConsentNotice") var showConsentNotice: Bool = true
-    @AppStorage("consentSnippet") var consentSnippet: String = "Esta reunião está sendo transcrita localmente pelo Muesli."
+    @AppStorage("consentSnippet") var consentSnippet: String = "Esta reunião está sendo gravada pelo Muesli."
     @AppStorage("storageBookmark") var storagePath: String = ""
 
     @AppStorage("aiProvider") var aiProviderRaw: String = AIProvider.auto.rawValue
