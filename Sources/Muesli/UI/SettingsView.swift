@@ -1102,6 +1102,11 @@ private struct RecordingSettingsTab: View {
                     Text("Evita que a voz das caixas de som entre no seu microfone como “Eu”.")
                         .font(.caption)
                         .foregroundStyle(CoastalTheme.secondaryText)
+                    if settings.echoCancellation && settings.vpKnownBad {
+                        Text("O processamento de voz falhou neste Mac na última tentativa; desative e ative novamente para testar de novo.")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 

@@ -154,7 +154,7 @@ final class AppSettings: ObservableObject {
     @AppStorage("echoCancellation") var echoCancellation: Bool = true {
         didSet { if vpKnownBad { vpKnownBad = false } }
     }
-    @AppStorage("vpKnownBad") var vpKnownBad: Bool = false
+    @AppStorage("vpKnownBadV2") var vpKnownBad: Bool = false
     @AppStorage("captureSystemAudio") var captureSystemAudio: Bool = true
     @AppStorage("showConsentNotice") var showConsentNotice: Bool = true
     @AppStorage("consentSnippet") var consentSnippet: String = "Esta reunião está sendo gravada pelo Muesli."

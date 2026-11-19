@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AVFoundation
 @testable import Muesli
 
 @Suite struct WavWriterTests {
@@ -289,5 +290,34 @@ import Foundation
         #expect(CollapsedCategoryPreferences.decode(raw) == [firstID, secondID])
         #expect(CollapsedCategoryPreferences.decode(collapsed) == [secondID])
         #expect(CollapsedCategoryPreferences.decode(CollapsedCategoryPreferences.toggle(firstID, in: collapsed)) == [firstID, secondID])
+    }
+}
+
+@Suite struct StreamConverterTests {
+    @Test func convertsMultiChannelDiscreteVoiceProcessingFormatToNonSilentMono() throws {
+        let tag = kAudioChannelLayoutTag_DiscreteInOrder | 5
+        let layout = AVAudioChannelLayout(layoutTag: tag)!
+        let format = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48000,
+            interleaved: false,
+            channelLayout: layout
+        )
+        let frameCount: AVAudioFrameCount = 4800
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount))
+        buffer.frameLength = frameCount
+
+        let floatData = try #require(buffer.floatChannelData)
+        for ch in 0..<5 {
+            for i in 0..<Int(frameCount) {
+                floatData[ch][i] = sinf(2.0 * .pi * 440.0 * Float(i) / 48000.0) * 0.5
+            }
+        }
+
+        let converter = StreamConverter()
+        let out = converter.convert(buffer)
+        let peak = out.map { Int($0.magnitude) }.max() ?? 0
+        #expect(out.count > 1000)
+        #expect(peak > 10000)
     }
 }

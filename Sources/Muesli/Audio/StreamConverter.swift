@@ -24,7 +24,14 @@ final class StreamConverter {
         }
 
         if converter == nil || sourceFormat != buffer.format {
-            converter = AVAudioConverter(from: buffer.format, to: StreamConverter.targetFormat)
+            let newConverter = AVAudioConverter(from: buffer.format, to: StreamConverter.targetFormat)
+            // AUVoiceIO on multi-mic Macs reports 5–7 discrete channels
+            // (kAudioChannelLayoutTag_DiscreteInOrder). AVAudioConverter outputs
+            // pure silence when downmixing a discrete layout unless channel 0 is mapped explicitly.
+            if let newConverter, Self.shouldMapChannelZero(for: buffer.format) {
+                newConverter.channelMap = [0]
+            }
+            converter = newConverter
             sourceFormat = buffer.format
         }
         guard let converter else { return [] }
@@ -47,5 +54,15 @@ final class StreamConverter {
 
         guard status != .error, out.frameLength > 0, let ch = out.int16ChannelData else { return [] }
         return Array(UnsafeBufferPointer(start: ch[0], count: Int(out.frameLength)))
+    }
+
+    static func shouldMapChannelZero(for format: AVAudioFormat) -> Bool {
+        if format.channelCount > 2 { return true }
+        if format.channelCount > 1,
+           let tag = format.channelLayout?.layoutTag,
+           (tag & 0xFFFF0000) == kAudioChannelLayoutTag_DiscreteInOrder {
+            return true
+        }
+        return false
     }
 }

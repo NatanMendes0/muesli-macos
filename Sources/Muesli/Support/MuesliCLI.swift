@@ -63,9 +63,10 @@ enum MuesliCLI {
                 do {
                     try await mic.start(echoCancellation: vp)
                     try? await Task.sleep(nanoseconds: 3_500_000_000)
+                    let vpActive = mic.voiceProcessingActive
                     mic.stop()
                     lock.lock()
-                    lines.append("echoCancel=\(vp): buffers=\(bufferCount) samples=\(sampleCount) peak=\(peak) vpStillActive=\(mic.voiceProcessingActive)")
+                    lines.append("echoCancel=\(vp): buffers=\(bufferCount) samples=\(sampleCount) peak=\(peak) vpStillActive=\(vpActive)")
                     lock.unlock()
                 } catch {
                     lines.append("echoCancel=\(vp): START ERROR \(error.localizedDescription)")

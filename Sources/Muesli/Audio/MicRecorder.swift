@@ -115,22 +115,62 @@ final class MicRecorder {
 
     // MARK: - Voice-processing bring-up (deadline-bound)
 
-    /// Builds a complete, running voice-processing engine on a throwaway thread.
-    /// Returns nil if it errors or misses the deadline; an engine that finishes
-    /// late is torn down by its own thread.
+    /// Builds a complete, running voice-processing engine on a throwaway thread
+    /// and waits until the first audio buffer arrives (settling any initial
+    /// AUVoiceIO configuration change). Returns nil if it errors or misses the
+    /// deadline; an engine that finishes late is torn down cleanly.
     private func buildVoiceProcessedEngine(deadline: Double) async -> (AVAudioEngine, Int)? {
-        final class ProbeBox {
+        final class ProbeBox: @unchecked Sendable {
             let lock = NSLock()
             var abandoned = false
+            var settled = false
+            var failed = false
             var engine: AVAudioEngine?
+            var bringUpObserver: NSObjectProtocol?
         }
 
         let box = ProbeBox()
         let sem = DispatchSemaphore(value: 0)
         let gen = genCounter.next() // live only once adopted
+        let configQueue = OperationQueue()
+        configQueue.name = "muesli.vp.config"
+        configQueue.maxConcurrentOperationCount = 1
 
         let thread = Thread { [weak self] in
             let engine = AVAudioEngine()
+            let failAndCleanup: (Error) -> Void = { error in
+                NSLog("Muesli: voice-processing bring-up failed: \(error.localizedDescription)")
+                box.lock.lock()
+                box.failed = true
+                box.engine = nil
+                let obs = box.bringUpObserver
+                box.bringUpObserver = nil
+                let abandoned = box.abandoned
+                box.lock.unlock()
+                if let obs { NotificationCenter.default.removeObserver(obs) }
+                Self.discard(engine, voiceProcessed: true)
+                if !abandoned { sem.signal() }
+            }
+
+            let installTapAndStart: () throws -> Void = {
+                let input = engine.inputNode
+                let format = input.outputFormat(forBus: 0)
+                guard format.sampleRate > 0, format.channelCount > 0 else {
+                    throw MicError.invalidInputFormat
+                }
+                input.removeTap(onBus: 0)
+                input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
+                    box.lock.lock()
+                    let shouldSignal = !box.settled && !box.failed && !box.abandoned
+                    if shouldSignal { box.settled = true }
+                    box.lock.unlock()
+                    if shouldSignal { sem.signal() }
+                    self?.handle(buffer, gen: gen)
+                }
+                engine.prepare()
+                try engine.start()
+            }
+
             do {
                 let input = engine.inputNode
                 try input.setVoiceProcessingEnabled(true) // ← the call that stalls/fails on broken systems
@@ -141,34 +181,46 @@ final class MicRecorder {
                             duckingLevel: .min
                         )
                 }
-                // AUVoiceIO is full-duplex; keep its render side alive (muted).
-                engine.mainMixerNode.outputVolume = 0
-                let format = input.outputFormat(forBus: 0)
-                guard format.sampleRate > 0, format.channelCount > 0 else {
-                    throw MicError.invalidInputFormat
+                // AUVoiceIO is full-duplex; keep its render side alive (muted) without
+                // touching mainMixerNode (which fails kAUInitialize -10875 on macOS 27).
+                let silentPlayer = AVAudioPlayerNode()
+                engine.attach(silentPlayer)
+                let outFormat = engine.outputNode.inputFormat(forBus: 0)
+                if outFormat.sampleRate > 0, outFormat.channelCount > 0 {
+                    engine.connect(silentPlayer, to: engine.outputNode, format: outFormat)
                 }
-                input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                    self?.handle(buffer, gen: gen)
+                silentPlayer.volume = 0
+
+                let obs = NotificationCenter.default.addObserver(
+                    forName: .AVAudioEngineConfigurationChange,
+                    object: engine,
+                    queue: configQueue
+                ) { _ in
+                    box.lock.lock()
+                    let ignore = box.abandoned || box.failed || box.settled
+                    box.lock.unlock()
+                    guard !ignore, !engine.isRunning else { return }
+                    do {
+                        try installTapAndStart()
+                    } catch {
+                        failAndCleanup(error)
+                    }
                 }
-                engine.prepare()
-                try engine.start()
 
                 box.lock.lock()
                 if box.abandoned {
                     box.lock.unlock()
+                    NotificationCenter.default.removeObserver(obs)
                     Self.discard(engine, voiceProcessed: true)
                     return
                 }
                 box.engine = engine
+                box.bringUpObserver = obs
                 box.lock.unlock()
-                sem.signal()
+
+                try installTapAndStart()
             } catch {
-                NSLog("Muesli: voice-processing bring-up failed: \(error.localizedDescription)")
-                box.lock.lock()
-                let abandoned = box.abandoned
-                box.lock.unlock()
-                engine.stop()
-                if !abandoned { sem.signal() }
+                failAndCleanup(error)
             }
         }
         thread.name = "muesli.vp.bringup"
@@ -176,16 +228,18 @@ final class MicRecorder {
 
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                if sem.wait(timeout: .now() + deadline) == .timedOut {
-                    box.lock.lock()
-                    box.abandoned = true
-                    box.lock.unlock()
-                    cont.resume(returning: nil)
-                    return
-                }
+                let timedOut = sem.wait(timeout: .now() + deadline) == .timedOut
                 box.lock.lock()
-                let engine = box.engine
+                if timedOut { box.abandoned = true }
+                let obs = box.bringUpObserver
+                box.bringUpObserver = nil
+                let engine = (!timedOut && box.settled && !box.failed) ? box.engine : nil
+                let leftover = timedOut ? box.engine : nil
+                box.engine = nil
                 box.lock.unlock()
+
+                if let obs { NotificationCenter.default.removeObserver(obs) }
+                if let leftover { Self.discard(leftover, voiceProcessed: true) }
                 cont.resume(returning: engine.map { ($0, gen) })
             }
         }
