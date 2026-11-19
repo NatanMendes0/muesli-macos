@@ -78,4 +78,37 @@ enum KeychainHelper {
         }
         return out
     }
+
+    // MARK: - Consolidated API key bundle
+
+    static let bundleAccount = "api-keys-v1"
+
+    static func encodeKeyBundle(_ bundle: [String: [String]]) -> String? {
+        let normalized = bundle.reduce(into: [String: [String]]()) { acc, entry in
+            let cleaned = cleanKeys(entry.value)
+            if !cleaned.isEmpty {
+                acc[entry.key] = cleaned
+            }
+        }
+        guard let data = try? JSONEncoder().encode(normalized) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeKeyBundle(_ json: String) -> [String: [String]]? {
+        guard let data = json.data(using: .utf8),
+              let raw = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else { return nil }
+        return raw.mapValues { cleanKeys($0) }
+    }
+
+    static func loadKeyBundle() -> [String: [String]]? {
+        guard let raw = load(account: bundleAccount) else { return nil }
+        return decodeKeyBundle(raw)
+    }
+
+    @discardableResult
+    static func saveKeyBundle(_ bundle: [String: [String]]) -> Bool {
+        guard let json = encodeKeyBundle(bundle) else { return false }
+        return save(json, account: bundleAccount)
+    }
 }

@@ -176,29 +176,29 @@ final class AppSettings: ObservableObject {
         set { ollamaBaseURL = newValue }
     }
 
-    // Multi-key lists persisted in Keychain
+    // Multi-key lists persisted in a single consolidated Keychain bundle
     @Published var groqKeys: [String] {
-        didSet { KeychainHelper.saveKeys(groqKeys, account: "groq-api-keys") }
+        didSet { persistKeyBundle() }
     }
     @Published var geminiKeys: [String] {
-        didSet { KeychainHelper.saveKeys(geminiKeys, account: "gemini-api-keys") }
+        didSet { persistKeyBundle() }
     }
     @Published var openAIKeys: [String] {
-        didSet { KeychainHelper.saveKeys(openAIKeys, account: "openai-api-keys") }
+        didSet { persistKeyBundle() }
     }
     @Published var anthropicKeys: [String] {
-        didSet { KeychainHelper.saveKeys(anthropicKeys, account: "anthropic-api-keys") }
+        didSet { persistKeyBundle() }
     }
 
     // Dedicated STT multi-key lists persisted in Keychain (falls back to AI keys if empty)
     @Published var sttGroqKeys: [String] {
-        didSet { KeychainHelper.saveKeys(sttGroqKeys, account: "stt-groq-api-keys") }
+        didSet { persistKeyBundle() }
     }
     @Published var sttOpenAIKeys: [String] {
-        didSet { KeychainHelper.saveKeys(sttOpenAIKeys, account: "stt-openai-api-keys") }
+        didSet { persistKeyBundle() }
     }
     @Published var sttOpenRouterKeys: [String] {
-        didSet { KeychainHelper.saveKeys(sttOpenRouterKeys, account: "stt-openrouter-api-keys") }
+        didSet { persistKeyBundle() }
     }
 
     // Convenience single-key bridges for CLI / tests / simple callers
@@ -235,13 +235,48 @@ final class AppSettings: ObservableObject {
     }
 
     init() {
-        self.groqKeys = KeychainHelper.loadKeys(account: "groq-api-keys")
-        self.geminiKeys = KeychainHelper.loadKeys(account: "gemini-api-keys")
-        self.openAIKeys = KeychainHelper.loadKeys(account: "openai-api-keys", fallbackSingleAccount: "openai-api-key")
-        self.anthropicKeys = KeychainHelper.loadKeys(account: "anthropic-api-keys", fallbackSingleAccount: "anthropic-api-key")
-        self.sttGroqKeys = KeychainHelper.loadKeys(account: "stt-groq-api-keys")
-        self.sttOpenAIKeys = KeychainHelper.loadKeys(account: "stt-openai-api-keys")
-        self.sttOpenRouterKeys = KeychainHelper.loadKeys(account: "stt-openrouter-api-keys")
+        if let bundle = KeychainHelper.loadKeyBundle() {
+            self.groqKeys = bundle["groq"] ?? []
+            self.geminiKeys = bundle["gemini"] ?? []
+            self.openAIKeys = bundle["openai"] ?? []
+            self.anthropicKeys = bundle["anthropic"] ?? []
+            self.sttGroqKeys = bundle["sttGroq"] ?? []
+            self.sttOpenAIKeys = bundle["sttOpenAI"] ?? []
+            self.sttOpenRouterKeys = bundle["sttOpenRouter"] ?? []
+        } else {
+            let groq = KeychainHelper.loadKeys(account: "groq-api-keys")
+            let gemini = KeychainHelper.loadKeys(account: "gemini-api-keys")
+            let openAI = KeychainHelper.loadKeys(account: "openai-api-keys", fallbackSingleAccount: "openai-api-key")
+            let anthropic = KeychainHelper.loadKeys(account: "anthropic-api-keys", fallbackSingleAccount: "anthropic-api-key")
+            let sttGroq = KeychainHelper.loadKeys(account: "stt-groq-api-keys")
+            let sttOpenAI = KeychainHelper.loadKeys(account: "stt-openai-api-keys")
+            let sttOpenRouter = KeychainHelper.loadKeys(account: "stt-openrouter-api-keys")
+
+            self.groqKeys = groq
+            self.geminiKeys = gemini
+            self.openAIKeys = openAI
+            self.anthropicKeys = anthropic
+            self.sttGroqKeys = sttGroq
+            self.sttOpenAIKeys = sttOpenAI
+            self.sttOpenRouterKeys = sttOpenRouter
+
+            if !groq.isEmpty || !gemini.isEmpty || !openAI.isEmpty || !anthropic.isEmpty
+                || !sttGroq.isEmpty || !sttOpenAI.isEmpty || !sttOpenRouter.isEmpty {
+                persistKeyBundle()
+            }
+        }
+    }
+
+    private func persistKeyBundle() {
+        KeychainHelper.saveKeyBundle([
+            "groq": groqKeys,
+            "gemini": geminiKeys,
+            "openai": openAIKeys,
+            "anthropic": anthropicKeys,
+            "sttGroq": sttGroqKeys,
+            "sttOpenAI": sttOpenAIKeys,
+            "sttOpenRouter": sttOpenRouterKeys,
+        ])
     }
 
     func resolvedSTTKeys(for engine: STTEngine? = nil) -> [String] {

@@ -16,10 +16,14 @@ icon:
 	@swift Scripts/make-icon.swift
 	@echo "Wrote Support/AppIcon.icns"
 
+LSREGISTER := /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
 install: app
 	@mkdir -p ~/Applications
+	@-$(LSREGISTER) -u build/Muesli.app >/dev/null 2>&1 || true
 	@rm -rf ~/Applications/Muesli.app
-	@cp -R build/Muesli.app ~/Applications/Muesli.app
+	@mv build/Muesli.app ~/Applications/Muesli.app
+	@-$(LSREGISTER) -f ~/Applications/Muesli.app >/dev/null 2>&1 || true
 	@echo "Installed to ~/Applications/Muesli.app"
 
 clean:

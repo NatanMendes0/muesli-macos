@@ -321,3 +321,17 @@ import AVFoundation
         #expect(peak > 10000)
     }
 }
+
+@Suite struct KeychainBundleTests {
+    @Test func bundleRoundTripsAndNormalizesKeys() throws {
+        let encoded = try #require(KeychainHelper.encodeKeyBundle([
+            "groq": [" gsk_1 ", "gsk_1", "", "gsk_2"],
+            "openai": ["   "],
+            "sttOpenRouter": [" sk-or-1 "],
+        ]))
+        let decoded = try #require(KeychainHelper.decodeKeyBundle(encoded))
+        #expect(decoded["groq"] == ["gsk_1", "gsk_2"])
+        #expect(decoded["openai"] == nil)
+        #expect(decoded["sttOpenRouter"] == ["sk-or-1"])
+    }
+}

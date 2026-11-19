@@ -51,7 +51,23 @@ if [ -f Support/AppIcon.icns ]; then
   cp Support/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-# Ad-hoc signature: enough for local TCC (mic / screen recording) attribution.
-/usr/bin/codesign --force --sign - --identifier app.muesli.Muesli "$APP" >/dev/null 2>&1
+# Prefer a real local signing identity so Keychain ACLs and TCC permissions
+# (Microphone, Screen & System Audio) survive across rebuilds/updates instead
+# of breaking on every new ad-hoc CDHash. Falls back to ad-hoc in CI.
+SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_IDENTITY" ]; then
+  IDENTITIES="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)"
+  SIGN_IDENTITY="$(printf '%s\n' "$IDENTITIES" | /usr/bin/sed -nE 's/.*"(Developer ID Application:[^"]+)".*/\1/p' | /usr/bin/head -n 1 || true)"
+  if [ -z "$SIGN_IDENTITY" ]; then
+    SIGN_IDENTITY="$(printf '%s\n' "$IDENTITIES" | /usr/bin/sed -nE 's/.*"(Apple Development:[^"]+)".*/\1/p' | /usr/bin/head -n 1 || true)"
+  fi
+fi
+
+if [ -n "$SIGN_IDENTITY" ]; then
+  echo "Signing with: $SIGN_IDENTITY"
+  /usr/bin/codesign --force --sign "$SIGN_IDENTITY" --identifier app.muesli.Muesli "$APP"
+else
+  /usr/bin/codesign --force --sign - --identifier app.muesli.Muesli "$APP" >/dev/null 2>&1
+fi
 
 echo "Built $APP"
