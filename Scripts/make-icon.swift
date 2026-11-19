@@ -1,4 +1,4 @@
-// Generates Support/AppIcon.icns — a cream squircle with a toasted-oat waveform.
+// Generates Support/AppIcon.icns — a black squircle with a toasted-oat waveform.
 // Run:  SDKROOT=$(xcrun --show-sdk-path) swift Scripts/make-icon.swift
 import AppKit
 
@@ -17,10 +17,19 @@ func render(size: Int) -> NSBitmapImageRep {
     let squircle = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: s, height: s), xRadius: radius, yRadius: radius)
 
     let gradient = NSGradient(
-        starting: NSColor(calibratedRed: 0.94, green: 0.85, blue: 0.72, alpha: 1),
-        ending: NSColor(calibratedRed: 0.97, green: 0.93, blue: 0.86, alpha: 1)
+        starting: NSColor(calibratedRed: 0.02, green: 0.02, blue: 0.025, alpha: 1),
+        ending: NSColor(calibratedRed: 0.08, green: 0.08, blue: 0.09, alpha: 1)
     )!
     gradient.draw(in: squircle, angle: 90)
+
+    // Subtle inner rim so the black squircle keeps crisp edges on dark docks.
+    NSGraphicsContext.saveGraphicsState()
+    squircle.addClip()
+    let borderPath = NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: s, height: s), xRadius: radius, yRadius: radius)
+    borderPath.lineWidth = max(1.0, s * 0.006)
+    NSColor(calibratedWhite: 1.0, alpha: 0.14).setStroke()
+    borderPath.stroke()
+    NSGraphicsContext.restoreGraphicsState()
 
     // Waveform bars.
     let heights: [CGFloat] = [0.30, 0.52, 0.80, 0.46, 0.26]
@@ -28,14 +37,14 @@ func render(size: Int) -> NSBitmapImageRep {
     let gap = s * 0.052
     let total = barW * CGFloat(heights.count) + gap * CGFloat(heights.count - 1)
     var x = (s - total) / 2
-    let bar = NSColor(calibratedRed: 0.80, green: 0.49, blue: 0.21, alpha: 1)
-    let barDark = NSColor(calibratedRed: 0.62, green: 0.36, blue: 0.13, alpha: 1)
+    let bar = NSColor(calibratedRed: 0.85, green: 0.54, blue: 0.25, alpha: 1)
+    let barHighlight = NSColor(calibratedRed: 0.95, green: 0.68, blue: 0.36, alpha: 1)
 
     for (i, frac) in heights.enumerated() {
         let h = s * 0.66 * frac
         let rect = NSRect(x: x, y: (s - h) / 2, width: barW, height: h)
         let path = NSBezierPath(roundedRect: rect, xRadius: barW / 2, yRadius: barW / 2)
-        NSGradient(starting: i == 2 ? barDark : bar, ending: bar)!.draw(in: path, angle: 90)
+        NSGradient(starting: bar, ending: i == 2 ? barHighlight : bar)!.draw(in: path, angle: 90)
         x += barW + gap
     }
 

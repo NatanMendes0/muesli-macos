@@ -36,5 +36,5 @@ Never introduce a new hue. Warmth comes from oat + cream (the icon), not from ti
 
 ## Icon
 
-Cream squircle, five toasted-oat waveform bars (center bar darkest). Regenerate with
+Black squircle, five toasted-oat waveform bars (center bar highlighted). Regenerate with
 `make icon` — never hand-edit the .icns.
