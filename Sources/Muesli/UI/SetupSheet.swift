@@ -130,6 +130,7 @@ struct SetupSheet: View {
         }
         .padding(24)
         .frame(width: 560)
+        .background(CoastalTheme.background)
         .onAppear {
             refresh()
             refreshTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in

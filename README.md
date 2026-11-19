@@ -40,19 +40,55 @@ flowchart LR
 
 ## Capturas de tela
 
-Capturas reais da interface do Muesli v1.4.4.
+Capturas reais da interface do Muesli v1.4.4 no tema escuro.
 
 ### Tela principal
 
 A barra lateral mostra as categorias recolhidas para facilitar uma visão geral; cada uma pode ser expandida para exibir suas reuniões.
 
-![Tela principal do Muesli v1.4.4 com categorias recolhidas](docs/screenshots/muesli-1.4.4-principal.png)
+![Tela principal do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-principal.png)
 
-### Configurações de gravação e áudio
+### Configuração inicial
 
-As opções de captura e o lembrete personalizado ficam nas configurações de gravação. O aviso técnico de privacidade continua visível durante a gravação.
+Checklist guiado de permissões, mecanismo Whisper, modelo de fala e provedor de IA.
+
+![Configuração inicial do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-setup-inicial.png)
+
+### Configurações — Geral
+
+Escolha do tema da interface (Claro, Escuro ou Automático), aprimoramento automático ao parar a gravação e pasta local dos dados.
+
+![Configurações gerais do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-config-geral.png)
+
+### Configurações — Transcrição
+
+Seleção do motor de transcrição (Whisper local ou nuvem), idioma da fala, tamanho dos blocos e gerenciamento dos modelos `ggml`.
+
+![Configurações de transcrição do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-config-transcricao.png)
+
+### Configurações — Modelos de IA
+
+Configuração de provedores (Groq, Google Gemini, OpenAI e compatíveis, Anthropic Claude e Ollama local) com suporte a múltiplas chaves.
+
+![Configurações de modelos de IA do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-config-ia.png)
+
+### Configurações — Modelos de Notas
+
+Modelos de ata pré-definidos e criação de modelos personalizados com seções configuráveis.
+
+![Configurações de modelos de notas do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-config-modelos-notas.png)
+
+### Configurações — Gravação e Áudio
+
+As opções de captura, cancelamento de eco, lembrete personalizado e atalhos para permissões do macOS. O aviso técnico de privacidade continua visível durante a gravação.
 
 ![Configurações de gravação e áudio do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-gravacao.png)
+
+### Configurações — Atualizações
+
+Verificação de novas versões diretamente no GitHub.
+
+![Configurações de atualizações do Muesli v1.4.4](docs/screenshots/muesli-1.4.4-config-atualizacoes.png)
 
 ## Início rápido
 
