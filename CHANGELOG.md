@@ -2,6 +2,22 @@
 
 Todas as mudanças notáveis de cada versão do Muesli para macOS são documentadas aqui e publicadas automaticamente nas Releases do GitHub.
 
+## v1.5.0
+
+### Português
+- **Servidor MCP nativo (Model Context Protocol):** integração completa com o protocolo MCP sobre `stdio` e `HTTP/SSE`, permitindo conectar ferramentas e agentes externos como Claude Desktop, Antigravity, Cursor, Gemini CLI e Codex CLI diretamente ao Muesli.
+- **Conexão com Gemini Cloud e ChatGPT (Web / Custom GPTs):** suporte a endpoints HTTP com Server-Sent Events (`/sse`, `/message`), endpoints REST (`/api/...`) e especificação OpenAPI 3.0 (`/openapi.json`) com autenticação via Bearer Token, tornando simples a exposição via túnel seguro (Cloudflare Tunnel, ngrok) para modelos e agentes na nuvem.
+- **Conjunto com 15 ferramentas, recursos e prompts:** suporte completo para listar, buscar e detalhar reuniões, consultar e atualizar notas e resumos aprimorados, gerenciar categorias e modelos, e controlar gravações ao vivo (`start_recording`, `stop_recording`, `get_recording_status`, `get_live_transcript`).
+- **Encaminhamento inteligente via CLI (`Muesli --mcp`):** quando o aplicativo gráfico do Muesli estiver aberto, o cliente `stdio` encaminha automaticamente as requisições para a instância em execução via HTTP local, permitindo controlar a gravação ao vivo na janela; se o app estiver fechado, o servidor opera em modo headless diretamente nos arquivos locais.
+- **Aba de configurações "Servidor MCP":** nova tela nas Configurações com alternador de ativação do servidor, porta customizável, geração/cópia de token de autenticação e cartões de configuração prontos para Claude Desktop, Cursor, Antigravity e túneis de nuvem.
+
+### English
+- **Native MCP Server (Model Context Protocol):** full integration with the MCP protocol over both `stdio` and `HTTP/SSE`, allowing external tools and agents such as Claude Desktop, Antigravity, Cursor, Gemini CLI, and Codex CLI to connect directly to Muesli.
+- **Gemini Cloud and ChatGPT (Web / Custom GPTs) connectivity:** support for HTTP Server-Sent Events endpoints (`/sse`, `/message`), REST endpoints (`/api/...`), and an OpenAPI 3.0 specification (`/openapi.json`) with Bearer Token authentication, enabling easy integration via secure tunnels (Cloudflare Tunnel, ngrok) with cloud-hosted AI models and agents.
+- **15 tools, resources, and prompts suite:** comprehensive capabilities to list, search, and inspect meetings, read and update quick notes and enhanced summaries, manage categories and templates, and control live recording sessions (`start_recording`, `stop_recording`, `get_recording_status`, `get_live_transcript`).
+- **Smart CLI stdio proxying (`Muesli --mcp`):** when the Muesli GUI app is running, stdio requests automatically proxy to the active app instance via local HTTP to drive live recording in the window; if closed, it operates headlessly directly against local disk storage.
+- **"MCP Server" Settings tab:** new configuration view with a server toggle, customizable port, Bearer token generator/copy controls, and 1-click ready-to-use configuration snippets for Claude Desktop, Cursor, Antigravity, and Cloud Tunnels.
+
 ## v1.4.7
 
 ### Português

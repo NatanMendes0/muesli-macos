@@ -163,6 +163,12 @@ Sources/Muesli/
 │   ├── Enhancer                clientes Groq/Gemini/OpenAI/Anthropic/Ollama e prompts
 │   └── Templates               estruturas de notas (Auto, 1:1, Vendas etc.)
 ├── Storage/MeetingStore        JSON como fonte de dados e espelhos Markdown; exclusão via Lixo
+├── MCP/                        servidor Model Context Protocol (stdio, HTTP/SSE, REST e OpenAPI)
+│   ├── MCPSpec                 especificação JSON-RPC 2.0 e AnyCodable
+│   ├── MCPService              15 ferramentas, recursos e prompts MCP integrados ao app
+│   ├── MCPHTTPServer           servidor HTTP/SSE nativo com Network.framework
+│   ├── MCPStdioTransport       transporte stdio para CLI e IDEs locais
+│   └── MCPServerManager        gerenciamento do ciclo de vida no app
 ├── UI/                         interface SwiftUI: barra lateral, abas, gravação, configuração
 └── Support/                    preferências, Keychain, permissões e CLI interno
 ```
@@ -171,13 +177,117 @@ As categorias são armazenadas em `categories.json`; cada reunião guarda o iden
 
 O projeto não tem dependências Swift externas: usa frameworks da Apple e, opcionalmente, o executável `whisper-cli` para transcrição local.
 
-### CLI interno (CI e verificação)
+### CLI interno e MCP
 
 ```bash
+Muesli --mcp                  # executa o servidor MCP sobre stdio (JSON-RPC 2.0)
+Muesli --mcp-serve            # executa o servidor HTTP/SSE MCP na porta padrão (4040)
 Muesli --selftest             # verifica armazenamento, WAV e parser
 Muesli --transcribe arquivo.wav # transcreve um arquivo pelo caminho Whisper do app
 Muesli --enhance-test         # testa o provedor de IA configurado
 ```
+
+## Servidor MCP (Model Context Protocol)
+
+O Muesli v1.5.0 inclui suporte nativo a **Model Context Protocol (MCP)**, permitindo que agentes e LLMs locais ou na nuvem consultem suas reuniões, notas, transcrições e controlem gravações ao vivo.
+
+O servidor funciona em dois modos simultâneos:
+1. **Local (`stdio`)**: ideal para **Claude Desktop**, **Antigravity**, **Cursor**, **Gemini CLI** e **Codex CLI**.
+2. **HTTP / SSE / REST / OpenAPI**: ideal para conectar **Gemini Cloud**, **ChatGPT (Web / Custom GPTs / Actions)** e agentes remotos através de um túnel seguro.
+
+### 1. Conectando Clientes Locais (stdio)
+
+Adicione a configuração no arquivo correspondente do seu cliente de IA (substitua pelo caminho do seu executável ou utilize o bundle instalado em `/Applications/Muesli.app` ou `~/Applications/Muesli.app`):
+
+#### Claude Desktop (`claude_desktop_config.json`) / Antigravity (`mcp.json`):
+```json
+{
+  "mcpServers": {
+    "muesli": {
+      "command": "/Applications/Muesli.app/Contents/MacOS/Muesli",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+#### Cursor (`.cursor/mcp.json`):
+```json
+{
+  "mcpServers": {
+    "muesli": {
+      "command": "/Applications/Muesli.app/Contents/MacOS/Muesli",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+> **Dica:** quando o aplicativo do Muesli estiver aberto na sua barra de menus ou tela, as requisições enviadas via `Muesli --mcp` são encaminhadas automaticamente para a janela ativa. Isso significa que ferramentas como `start_recording` e `stop_recording` controlam a gravação ao vivo na interface! Se o app estiver fechado, o servidor opera em modo headless diretamente contra os arquivos locais em disco.
+
+---
+
+### 2. Conectando Gemini Cloud e ChatGPT (Web / Custom GPTs)
+
+Modelos hospedados na nuvem (como o ChatGPT Web ou o Gemini Cloud) não conseguem acessar diretamente o IP local `127.0.0.1` do seu Mac. Para conectá-los com segurança:
+
+1. Ative o servidor em **Configurações → Servidor MCP** no Muesli.
+2. Copie seu **Token de Autenticação (Bearer)** gerado nas configurações.
+3. Exponha a porta do Muesli (padrão: `4040`) através de um túnel seguro, como o [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) ou [ngrok](https://ngrok.com/):
+
+```bash
+# Com Cloudflare Tunnel:
+cloudflared tunnel --url http://localhost:4040
+
+# Ou com ngrok:
+ngrok http 4040
+```
+
+#### Para o Gemini Cloud (MCP SSE):
+Configure o conector MCP remoto apontando para o endpoint SSE do seu túnel:
+- **URL SSE**: `https://<seu-tunnel>.trycloudflare.com/sse`
+- **Cabeçalho de Autenticação**: `Authorization: Bearer <seu-token-mcp>`
+
+#### Para o ChatGPT (Custom GPTs / Actions com OpenAPI):
+O Muesli gera automaticamente uma especificação OpenAPI 3.0 completa para todas as ferramentas:
+- No editor do seu Custom GPT, clique em **Create new action**.
+- Escolha **Import from URL** e informe: `https://<seu-tunnel>.trycloudflare.com/openapi.json`
+- Em **Authentication**, selecione **API Key**, tipo **Bearer**, e cole seu token do Muesli.
+- Agora o ChatGPT pode pesquisar reuniões, buscar transcrições e adicionar anotações diretamente na sua conversa!
+
+---
+
+### Ferramentas disponíveis (Tools)
+
+| Ferramenta | Descrição |
+|---|---|
+| `list_meetings` | Lista reuniões ordenadas por data (suporta limite, offset e filtro por categoria). |
+| `get_meeting` | Obtém detalhes completos de uma reunião (metadados, notas, transcrição, resumo aprimorado). |
+| `search_meetings` | Busca textual em títulos, notas, transcrições e resumos das reuniões. |
+| `get_meeting_transcript` | Retorna a transcrição completa com marcações de tempo e identificação de oradores (Eu / Outros). |
+| `get_meeting_notes` | Retorna as notas rápidas anotadas pelo usuário durante a reunião. |
+| `get_meeting_enhanced` | Retorna a ata aprimorada gerada por IA (decisões, tópicos, próximos passos). |
+| `update_meeting_notes` | Atualiza ou acrescenta novas anotações rápidas a uma reunião existente. |
+| `update_meeting_enhanced` | Salva uma nova versão ou edição da ata estruturada. |
+| `list_categories` | Lista todas as categorias de reuniões configuradas. |
+| `create_category` | Cria uma nova categoria no Muesli com cor e ícone. |
+| `set_meeting_category` | Associa uma reunião a uma categoria específica. |
+| `list_templates` | Lista os modelos de notas disponíveis (1:1, Vendas, Stand-up, etc.). |
+| `start_recording` | Inicia uma nova reunião e começa a gravação de áudio ao vivo. |
+| `stop_recording` | Encerra a gravação da reunião em andamento. |
+| `get_recording_status` | Verifica se há uma gravação ativa no momento, duração e contagem de trechos. |
+| `get_live_transcript` | Retorna a transcrição em tempo real da reunião que está sendo gravada. |
+
+### Recursos e Prompts MCP
+
+- **Recursos (`resources/list`)**:
+  - `muesli://status`: Status operacional do app e servidor.
+  - `muesli://meetings`: Catálogo resumido de reuniões.
+  - `muesli://meetings/{id}`: Dados completos de uma reunião em formato JSON/Markdown.
+- **Prompts (`prompts/list`)**:
+  - `summarize_meeting`: Prompt otimizado para gerar resumo executivo.
+  - `extract_action_items`: Prompt para extrair decisões e tarefas com responsáveis.
+  - `meeting_prep`: Prompt de preparação com base em reuniões anteriores da mesma categoria.
 
 ## Solução de problemas
 
