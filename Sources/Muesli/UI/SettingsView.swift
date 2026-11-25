@@ -6,6 +6,7 @@ struct SettingsView: View {
     @EnvironmentObject private var store: MeetingStore
     @EnvironmentObject private var updateChecker: UpdateChecker
     @EnvironmentObject private var templateStore: TemplateStore
+    @EnvironmentObject private var mcpManager: MCPServerManager
 
     @AppStorage("settingsSelectedTab") private var selectedTabRaw: String = SettingsTab.ai.rawValue
 
@@ -15,6 +16,7 @@ struct SettingsView: View {
         case ai = "ai"
         case templates = "templates"
         case recording = "recording"
+        case mcp = "mcp"
         case updates = "updates"
 
         var id: String { rawValue }
@@ -26,6 +28,7 @@ struct SettingsView: View {
             case .ai: return "Modelos de IA"
             case .templates: return "Modelos de Notas"
             case .recording: return "Gravação"
+            case .mcp: return "Servidor MCP"
             case .updates: return "Atualizações"
             }
         }
@@ -37,6 +40,7 @@ struct SettingsView: View {
             case .ai: return "sparkles"
             case .templates: return "doc.text"
             case .recording: return "mic"
+            case .mcp: return "network"
             case .updates: return "arrow.down.circle"
             }
         }
@@ -109,6 +113,7 @@ struct SettingsView: View {
                     case .ai: AISettingsTab()
                     case .templates: TemplatesSettingsTab()
                     case .recording: RecordingSettingsTab()
+                    case .mcp: MCPSettingsTab()
                     case .updates: UpdatesSettingsTab()
                     }
                 }
@@ -1232,5 +1237,369 @@ private struct UpdatesSettingsTab: View {
             }
         }
         .muesliCard()
+    }
+}
+
+// MARK: - 7. Servidor MCP
+
+private struct MCPSettingsTab: View {
+    @EnvironmentObject private var settings: AppSettings
+    @EnvironmentObject private var mcpManager: MCPServerManager
+
+    @State private var selectedGuide: Int = 0
+    @State private var showToken: Bool = false
+    @State private var copiedToast: String?
+    @State private var portText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Servidor MCP (Model Context Protocol)")
+                .font(.title3.weight(.bold))
+                .foregroundStyle(CoastalTheme.text)
+            Text("Conecte agentes de IA externos (Gemini Cloud, ChatGPT/Codex, Claude Desktop, Antigravity, Cursor) diretamente às reuniões, transcrições e gravações do Muesli.")
+                .font(.caption)
+                .foregroundStyle(CoastalTheme.secondaryText)
+        }
+
+        // 1. Status do Servidor
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Circle()
+                    .fill(mcpManager.isRunning ? CoastalTheme.ok : CoastalTheme.danger)
+                    .frame(width: 10, height: 10)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mcpManager.isRunning ? "Servidor MCP Ativo" : "Servidor MCP Inativo")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(CoastalTheme.text)
+
+                    if mcpManager.isRunning {
+                        Text("Ouvindo em \(mcpManager.serverURL) • Conexões ativas: \(mcpManager.clientCount)")
+                            .font(.caption)
+                            .foregroundStyle(CoastalTheme.secondaryText)
+                    } else if let err = mcpManager.lastError {
+                        Text("Erro: \(err)")
+                            .font(.caption)
+                            .foregroundStyle(CoastalTheme.danger)
+                    } else {
+                        Text("Ative o servidor abaixo para receber conexões locais ou via túnel.")
+                            .font(.caption)
+                            .foregroundStyle(CoastalTheme.secondaryText)
+                    }
+                }
+
+                Spacer()
+
+                if mcpManager.isRunning {
+                    Button("Reiniciar") {
+                        mcpManager.restart()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            }
+
+            Divider()
+
+            Toggle("Habilitar Servidor MCP no aplicativo", isOn: Binding(
+                get: { settings.mcpEnabled },
+                set: { val in
+                    settings.mcpEnabled = val
+                    if val {
+                        mcpManager.start()
+                    } else {
+                        mcpManager.stop()
+                    }
+                }
+            ))
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(CoastalTheme.text)
+        }
+        .muesliCard()
+
+        // 2. Opções de Rede e Segurança
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Configurações de Rede & Segurança")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(CoastalTheme.text)
+
+            HStack {
+                Text("Porta HTTP / SSE:")
+                    .font(.system(size: 13))
+                    .foregroundStyle(CoastalTheme.bodyText)
+                TextField("4040", text: $portText)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 80)
+                    .onAppear {
+                        portText = String(settings.mcpPort)
+                    }
+                    .onSubmit {
+                        if let p = Int(portText), p > 1024, p <= 65535 {
+                            settings.mcpPort = p
+                            mcpManager.restart()
+                        } else {
+                            portText = String(settings.mcpPort)
+                        }
+                    }
+                Text("(Padrão: 4040)")
+                    .font(.caption)
+                    .foregroundStyle(CoastalTheme.faintText)
+            }
+
+            Toggle("Permitir conexões de outras máquinas / túneis de rede (0.0.0.0)", isOn: Binding(
+                get: { settings.mcpAllowRemote },
+                set: { val in
+                    settings.mcpAllowRemote = val
+                    mcpManager.restart()
+                }
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(CoastalTheme.bodyText)
+
+            Divider()
+
+            Toggle("Exigir autenticação via Bearer Token", isOn: Binding(
+                get: { settings.mcpRequireAuth },
+                set: { val in
+                    settings.mcpRequireAuth = val
+                    if val {
+                        settings.ensureMCPAuthToken()
+                    }
+                    mcpManager.restart()
+                }
+            ))
+            .font(.system(size: 13, weight: .medium))
+            .foregroundStyle(CoastalTheme.text)
+
+            if settings.mcpRequireAuth || !settings.mcpAuthToken.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Token de Autenticação:")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(CoastalTheme.secondaryText)
+
+                    HStack(spacing: 8) {
+                        Group {
+                            if showToken {
+                                Text(settings.ensureMCPAuthToken())
+                            } else {
+                                Text(String(repeating: "•", count: 24))
+                            }
+                        }
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(CoastalTheme.text)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+
+                        Button {
+                            showToken.toggle()
+                        } label: {
+                            Image(systemName: showToken ? "eye.slash" : "eye")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(CoastalTheme.secondaryText)
+
+                        Button("Copiar Token") {
+                            copyToClipboard(settings.ensureMCPAuthToken(), label: "Token copiado!")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+
+                        Button("Gerar Novo") {
+                            _ = mcpManager.generateNewToken()
+                            copyToClipboard(settings.mcpAuthToken, label: "Novo token gerado e copiado!")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                }
+            }
+        }
+        .muesliCard()
+
+        // 3. Guias de Conexão Rápida
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Como Conectar seu Assistente de IA")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(CoastalTheme.text)
+
+            Picker("", selection: $selectedGuide) {
+                Text("Gemini Cloud & ChatGPT (Nuvem)").tag(0)
+                Text("Claude, Codex, Antigravity & Cursor (Local / stdio)").tag(1)
+                Text("Ferramentas Disponíveis").tag(2)
+            }
+            .pickerStyle(.segmented)
+
+            if selectedGuide == 0 {
+                // Nuvem / Web (Gemini Cloud e ChatGPT)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Para conectar assistentes na nuvem (ChatGPT Web ou Gemini Cloud) ao Muesli no seu Mac:")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CoastalTheme.bodyText)
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Passo 1: Crie um túnel seguro no Terminal (Cloudflare Tunnel gratuito):")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(CoastalTheme.text)
+
+                        HStack {
+                            Text("cloudflared tunnel --url http://127.0.0.1:\(settings.mcpPort)")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(CoastalTheme.text)
+                            Spacer()
+                            Button("Copiar") {
+                                copyToClipboard("cloudflared tunnel --url http://127.0.0.1:\(settings.mcpPort)", label: "Comando copiado!")
+                            }
+                            .controlSize(.mini)
+                        }
+                        .padding(8)
+                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Passo 2: No ChatGPT (Custom GPT / Actions) ou Gemini Cloud:")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(CoastalTheme.text)
+
+                        Text("• Para **ChatGPT Actions / Custom GPTs**: Cole a URL do OpenAPI abaixo substituindo pelo domínio do seu túnel:")
+                            .font(.caption)
+                            .foregroundStyle(CoastalTheme.secondaryText)
+
+                        HStack {
+                            Text("https://<seu-tunnel>.trycloudflare.com/openapi.json")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(CoastalTheme.text)
+                            Spacer()
+                            Button("Copiar Endpoint") {
+                                copyToClipboard("http://127.0.0.1:\(settings.mcpPort)/openapi.json", label: "Endpoint OpenAPI copiado!")
+                            }
+                            .controlSize(.mini)
+                        }
+                        .padding(8)
+                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+
+                        Text("• Para **Clientes MCP SSE (Gemini Cloud / MCP Connector)**: Use a URL de SSE:")
+                            .font(.caption)
+                            .foregroundStyle(CoastalTheme.secondaryText)
+
+                        HStack {
+                            Text("https://<seu-tunnel>.trycloudflare.com/sse")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(CoastalTheme.text)
+                            Spacer()
+                            Button("Copiar SSE") {
+                                copyToClipboard("http://127.0.0.1:\(settings.mcpPort)/sse", label: "Endpoint SSE copiado!")
+                            }
+                            .controlSize(.mini)
+                        }
+                        .padding(8)
+                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    }
+                }
+            } else if selectedGuide == 1 {
+                // Local / stdio (Claude Desktop, Antigravity, Cursor, Gemini CLI)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Adicione esta configuração ao arquivo de configuração MCP do seu editor ou cliente (ex: `claude_desktop_config.json`, `mcp.json` ou Antigravity):")
+                        .font(.system(size: 12))
+                        .foregroundStyle(CoastalTheme.bodyText)
+
+                    let appPath = Bundle.main.executablePath ?? "/Applications/Muesli.app/Contents/MacOS/Muesli"
+                    let stdioJSON = """
+                    {
+                      "mcpServers": {
+                        "muesli": {
+                          "command": "\(appPath)",
+                          "args": ["--mcp"]
+                        }
+                      }
+                    }
+                    """
+
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text(stdioJSON)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(CoastalTheme.text)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                            .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+
+                        HStack {
+                            Text("Ou conecte via SSE local: `http://127.0.0.1:\(settings.mcpPort)/sse`")
+                                .font(.caption2)
+                                .foregroundStyle(CoastalTheme.faintText)
+                            Spacer()
+                            Button("Copiar Configuração JSON") {
+                                copyToClipboard(stdioJSON, label: "Configuração JSON copiada!")
+                            }
+                            .controlSize(.small)
+                        }
+                    }
+                }
+            } else {
+                // Ferramentas Disponíveis
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("15 Ferramentas Prontas para Uso:")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(CoastalTheme.text)
+
+                    let toolList: [(String, String)] = [
+                        ("list_meetings", "Lista reuniões com título, data, duração e categoria."),
+                        ("get_meeting", "Obtém detalhes, notas, ata da IA e transcrição completa com falantes."),
+                        ("search_meetings", "Busca rápida em títulos, anotações, atas e falas do áudio."),
+                        ("create_meeting", "Cria uma nova reunião com anotações e modelo."),
+                        ("update_notes", "Atualiza ou anexa anotações em Markdown."),
+                        ("set_enhanced_notes", "Salva a ata aprimorada gerada pelo assistente."),
+                        ("enhance_meeting", "Dispara o modelo de IA do Muesli para gerar a ata."),
+                        ("delete_meeting", "Move a reunião para a Lixeira do macOS."),
+                        ("list_categories", "Lista categorias de reuniões existentes."),
+                        ("create_category", "Cria uma nova categoria."),
+                        ("list_templates", "Lista os modelos de ata (Formal, Standup, 1-on-1, etc.)."),
+                        ("get_recording_status", "Verifica se o Muesli está gravando agora e duração."),
+                        ("start_recording", "Inicia uma nova gravação no aplicativo."),
+                        ("stop_recording", "Para a gravação ativa e finaliza a ata."),
+                        ("get_live_transcript", "Lê o texto transcrito em tempo real durante a gravação.")
+                    ]
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(toolList, id: \.0) { tool in
+                                HStack(alignment: .top, spacing: 6) {
+                                    Text("`\(tool.0)`")
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(CoastalTheme.accent)
+                                        .frame(width: 150, alignment: .leading)
+                                    Text(tool.1)
+                                        .font(.caption)
+                                        .foregroundStyle(CoastalTheme.bodyText)
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 180)
+                }
+            }
+
+            if let toast = copiedToast {
+                Text("✅ \(toast)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(CoastalTheme.ok)
+            }
+        }
+        .muesliCard()
+    }
+
+    private func copyToClipboard(_ text: String, label: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        withAnimation {
+            copiedToast = label
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation {
+                if copiedToast == label {
+                    copiedToast = nil
+                }
+            }
+        }
     }
 }

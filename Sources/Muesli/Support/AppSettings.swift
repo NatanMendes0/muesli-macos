@@ -160,6 +160,21 @@ final class AppSettings: ObservableObject {
     @AppStorage("consentSnippet") var consentSnippet: String = "Esta reunião está sendo gravada pelo Muesli."
     @AppStorage("storageBookmark") var storagePath: String = ""
 
+    // Model Context Protocol (MCP) Server
+    @AppStorage("mcpEnabled") var mcpEnabled: Bool = true
+    @AppStorage("mcpPort") var mcpPort: Int = 4040
+    @AppStorage("mcpRequireAuth") var mcpRequireAuth: Bool = false
+    @AppStorage("mcpAuthToken") var mcpAuthToken: String = ""
+    @AppStorage("mcpAllowRemote") var mcpAllowRemote: Bool = false
+
+    @discardableResult
+    func ensureMCPAuthToken() -> String {
+        if mcpAuthToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            mcpAuthToken = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        }
+        return mcpAuthToken
+    }
+
     @AppStorage("aiProvider") var aiProviderRaw: String = AIProvider.auto.rawValue
 
     // Models & endpoints

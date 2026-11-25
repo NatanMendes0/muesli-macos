@@ -9,6 +9,7 @@ struct MuesliApp: App {
     @StateObject private var recorder: RecordingController
     @StateObject private var updateChecker = UpdateChecker()
     @StateObject private var templateStore = TemplateStore.shared
+    @StateObject private var mcpManager: MCPServerManager
     @State private var selectedMeetingID: UUID?
 
     init() {
@@ -19,9 +20,11 @@ struct MuesliApp: App {
         let settings = AppSettings()
         let store = MeetingStore(baseDir: settings.baseDir)
         let recorder = RecordingController(store: store, settings: settings)
+        let mcp = MCPServerManager(store: store, settings: settings, recorder: recorder)
         _settings = StateObject(wrappedValue: settings)
         _store = StateObject(wrappedValue: store)
         _recorder = StateObject(wrappedValue: recorder)
+        _mcpManager = StateObject(wrappedValue: mcp)
         _selectedMeetingID = State(initialValue: store.meetings.first?.id)
     }
 
@@ -33,6 +36,7 @@ struct MuesliApp: App {
                 .environmentObject(recorder)
                 .environmentObject(updateChecker)
                 .environmentObject(templateStore)
+                .environmentObject(mcpManager)
                 .preferredColorScheme(settings.themeMode.colorScheme)
                 .frame(minWidth: 960, minHeight: 620)
                 .onAppear {
@@ -73,6 +77,7 @@ struct MuesliApp: App {
                 .environmentObject(store)
                 .environmentObject(updateChecker)
                 .environmentObject(templateStore)
+                .environmentObject(mcpManager)
                 .preferredColorScheme(settings.themeMode.colorScheme)
         }
         .windowResizability(.contentSize)

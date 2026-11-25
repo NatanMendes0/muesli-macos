@@ -335,3 +335,219 @@ import AVFoundation
         #expect(decoded["sttOpenRouter"] == ["sk-or-1"])
     }
 }
+
+@Suite struct MCPServerTests {
+    @Test func jsonRPCSpecRoundTrip() throws {
+        // ID variants
+        let idInt = JSONRPCID.int(10)
+        let idStr = JSONRPCID.string("req-1")
+        let encInt = try JSONEncoder().encode(idInt)
+        let encStr = try JSONEncoder().encode(idStr)
+        #expect(try JSONDecoder().decode(JSONRPCID.self, from: encInt) == .int(10))
+        #expect(try JSONDecoder().decode(JSONRPCID.self, from: encStr) == .string("req-1"))
+
+        // Request with params
+        let req = JSONRPCRequest(
+            id: .int(1),
+            method: "tools/call",
+            params: AnyCodable([
+                "name": AnyCodable("list_meetings"),
+                "arguments": AnyCodable(["limit": AnyCodable(10)])
+            ])
+        )
+        let reqData = try JSONEncoder().encode(req)
+        let decodedReq = try JSONDecoder().decode(JSONRPCRequest.self, from: reqData)
+        #expect(decodedReq.method == "tools/call")
+        #expect(decodedReq.id == .int(1))
+        #expect(decodedReq.params?.dictionaryValue?["name"]?.stringValue == "list_meetings")
+
+        // Response with error
+        let errResp = JSONRPCResponse(id: .string("abc"), error: .methodNotFound("test"))
+        let errData = try JSONEncoder().encode(errResp)
+        let decodedErr = try JSONDecoder().decode(JSONRPCResponse.self, from: errData)
+        #expect(decodedErr.error?.code == -32601)
+    }
+
+    @Test func mcpServiceToolAndResourceLifecycle() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-mcp-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let settings = await MainActor.run { AppSettings() }
+        let store = await MainActor.run { MeetingStore(baseDir: tmpDir) }
+        let service = await MainActor.run { MCPService(store: store, settings: settings, recorder: nil) }
+
+        // 1. Initialize
+        let initReq = JSONRPCRequest(
+            id: .int(1),
+            method: "initialize",
+            params: AnyCodable(["protocolVersion": AnyCodable("2024-11-05")])
+        )
+        let initResp = await service.handle(request: initReq)
+        let initDict = try #require(initResp?.result?.dictionaryValue)
+        #expect(initDict["protocolVersion"]?.stringValue == "2024-11-05")
+
+        // 2. Tools list
+        let toolsReq = JSONRPCRequest(id: .int(2), method: "tools/list")
+        let toolsResp = await service.handle(request: toolsReq)
+        let toolsDict = try #require(toolsResp?.result?.dictionaryValue)
+        let toolsList = try #require(toolsDict["tools"]?.arrayValue)
+        let toolNames = Set(toolsList.compactMap { $0.dictionaryValue?["name"]?.stringValue })
+        #expect(toolNames.contains("list_meetings"))
+        #expect(toolNames.contains("get_meeting"))
+        #expect(toolNames.contains("search_meetings"))
+        #expect(toolNames.contains("create_meeting"))
+        #expect(toolNames.contains("update_notes"))
+        #expect(toolNames.contains("set_enhanced_notes"))
+        #expect(toolNames.contains("get_recording_status"))
+
+        // 3. Create meeting tool call
+        let createReq = JSONRPCRequest(
+            id: .int(3),
+            method: "tools/call",
+            params: AnyCodable([
+                "name": AnyCodable("create_meeting"),
+                "arguments": AnyCodable([
+                    "title": AnyCodable("Reunião MCP"),
+                    "notes": AnyCodable("- Decidimos usar MCP"),
+                    "category": AnyCodable("Engenharia")
+                ])
+            ])
+        )
+        let createResp = await service.handle(request: createReq)
+        let createContent = try #require(createResp?.result?.dictionaryValue?["content"]?.arrayValue)
+        let createText = try #require(createContent.first?.dictionaryValue?["text"]?.stringValue)
+        #expect(createText.contains("Reunião MCP"))
+
+        // 4. List meetings
+        let listReq = JSONRPCRequest(
+            id: .int(4),
+            method: "tools/call",
+            params: AnyCodable([
+                "name": AnyCodable("list_meetings"),
+                "arguments": AnyCodable(["limit": AnyCodable(10)])
+            ])
+        )
+        let listResp = await service.handle(request: listReq)
+        let listText = try #require(listResp?.result?.dictionaryValue?["content"]?.arrayValue?.first?.dictionaryValue?["text"]?.stringValue)
+        #expect(listText.contains("Reunião MCP"))
+        #expect(listText.contains("Engenharia"))
+
+        // 5. Search meetings
+        let searchReq = JSONRPCRequest(
+            id: .int(5),
+            method: "tools/call",
+            params: AnyCodable([
+                "name": AnyCodable("search_meetings"),
+                "arguments": AnyCodable(["query": AnyCodable("usar MCP")])
+            ])
+        )
+        let searchResp = await service.handle(request: searchReq)
+        let searchText = try #require(searchResp?.result?.dictionaryValue?["content"]?.arrayValue?.first?.dictionaryValue?["text"]?.stringValue)
+        #expect(searchText.contains("Reunião MCP"))
+
+        // 6. Resources read
+        let resReq = JSONRPCRequest(
+            id: .int(6),
+            method: "resources/read",
+            params: AnyCodable(["uri": AnyCodable("muesli://meetings")])
+        )
+        let resResp = await service.handle(request: resReq)
+        let resContents = try #require(resResp?.result?.dictionaryValue?["contents"]?.arrayValue)
+        let resText = try #require(resContents.first?.dictionaryValue?["text"]?.stringValue)
+        #expect(resText.contains("Reunião MCP"))
+
+        // 7. Prompts get
+        let promptReq = JSONRPCRequest(
+            id: .int(7),
+            method: "prompts/get",
+            params: AnyCodable([
+                "name": AnyCodable("summarize_meeting"),
+                "arguments": AnyCodable(["meeting_id": AnyCodable("Reunião MCP")])
+            ])
+        )
+        let promptResp = await service.handle(request: promptReq)
+        let messages = try #require(promptResp?.result?.dictionaryValue?["messages"]?.arrayValue)
+        let promptBody = try #require(messages.first?.dictionaryValue?["content"]?.dictionaryValue?["text"]?.stringValue)
+        #expect(promptBody.contains("Reunião: Reunião MCP"))
+    }
+
+    @Test func mcpHTTPServerEndpointsAndAuth() async throws {
+        let tmpDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-http-test-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tmpDir) }
+
+        let settings = await MainActor.run { AppSettings() }
+        let store = await MainActor.run { MeetingStore(baseDir: tmpDir) }
+        let service = await MainActor.run { MCPService(store: store, settings: settings, recorder: nil) }
+
+        // Create a meeting first
+        _ = await MainActor.run {
+            store.createMeeting(title: "Demo Server Test")
+        }
+
+        let port: UInt16 = 4059
+        let server = MCPHTTPServer(
+            port: port,
+            allowRemote: false,
+            requireAuth: true,
+            authToken: "test-auth-token-999",
+            service: service
+        )
+        try server.start()
+        defer { server.stop() }
+
+        // Give listener a moment to bind
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let session = URLSession.shared
+
+        // 1. GET /status (allowed without auth for health checks)
+        let statusURL = URL(string: "http://127.0.0.1:\(port)/status")!
+        let (statusData, statusResp) = try await session.data(from: statusURL)
+        let statusHTTP = try #require(statusResp as? HTTPURLResponse)
+        #expect(statusHTTP.statusCode == 200)
+        let statusJSON = try #require(try JSONSerialization.jsonObject(with: statusData) as? [String: Any])
+        #expect(statusJSON["app"] as? String == "Muesli")
+        #expect(statusJSON["status"] as? String == "ok")
+
+        // 2. GET /openapi.json (public documentation)
+        let openapiURL = URL(string: "http://127.0.0.1:\(port)/openapi.json")!
+        let (openapiData, openapiResp) = try await session.data(from: openapiURL)
+        let openapiHTTP = try #require(openapiResp as? HTTPURLResponse)
+        #expect(openapiHTTP.statusCode == 200)
+        let openapiJSON = try #require(try JSONSerialization.jsonObject(with: openapiData) as? [String: Any])
+        #expect(openapiJSON["openapi"] as? String == "3.0.0")
+
+        // 3. POST /mcp without Auth -> 401 Unauthorized
+        let mcpURL = URL(string: "http://127.0.0.1:\(port)/mcp")!
+        var unauthReq = URLRequest(url: mcpURL)
+        unauthReq.httpMethod = "POST"
+        unauthReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        unauthReq.httpBody = #"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.data(using: .utf8)
+        let (_, unauthResp) = try await session.data(for: unauthReq)
+        let unauthHTTP = try #require(unauthResp as? HTTPURLResponse)
+        #expect(unauthHTTP.statusCode == 401)
+
+        // 4. POST /mcp with Bearer Auth -> 200 OK
+        var authReq = unauthReq
+        authReq.setValue("Bearer test-auth-token-999", forHTTPHeaderField: "Authorization")
+        let (authData, authResp) = try await session.data(for: authReq)
+        let authHTTP = try #require(authResp as? HTTPURLResponse)
+        #expect(authHTTP.statusCode == 200)
+        let authJSON = try #require(try JSONSerialization.jsonObject(with: authData) as? [String: Any])
+        #expect(authJSON["jsonrpc"] as? String == "2.0")
+        #expect(authJSON["result"] != nil)
+
+        // 5. GET /api/meetings with Bearer Auth -> 200 OK with meeting list
+        var restReq = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/meetings")!)
+        restReq.setValue("Bearer test-auth-token-999", forHTTPHeaderField: "Authorization")
+        let (restData, restResp) = try await session.data(for: restReq)
+        let restHTTP = try #require(restResp as? HTTPURLResponse)
+        #expect(restHTTP.statusCode == 200)
+        let restJSON = try #require(try JSONSerialization.jsonObject(with: restData) as? [String: Any])
+        let meetings = try #require(restJSON["meetings"] as? [[String: Any]])
+        #expect(!meetings.isEmpty)
+        #expect(meetings.first?["title"] as? String == "Demo Server Test")
+    }
+}

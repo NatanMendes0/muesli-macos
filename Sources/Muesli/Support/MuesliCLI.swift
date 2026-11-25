@@ -2,17 +2,33 @@ import Foundation
 
 /// Hidden CLI entry points used for headless verification:
 ///
+///     Muesli --mcp                   run stdio Model Context Protocol (MCP) server
+///     Muesli --mcp-serve [--port N]  run headless HTTP/SSE MCP server
+///     Muesli --mcp-test              run automated tests on MCP protocol
 ///     Muesli --selftest              storage round-trip, wav writer, parser checks
 ///     Muesli --transcribe file.wav   run the app's whisper path on a file
 ///     Muesli --enhance-test          ping the configured AI provider (key from env or keychain)
 ///     Muesli --mictest [log]         capture 3 s with and without echo cancellation, report levels
 ///     Muesli --version
+@MainActor
 enum MuesliCLI {
     static func runIfNeeded() -> Bool {
         let args = CommandLine.arguments
         if args.contains("--version") {
             print("Muesli \(AppVersion.current)")
             return true
+        }
+        if args.contains("--mcp") {
+            MCPStdioTransport.run()
+            return true
+        }
+        if args.contains("--mcp-serve") {
+            let portIndex = args.firstIndex(of: "--port")
+            let port = portIndex.flatMap { args.count > $0 + 1 ? Int(args[$0 + 1]) : nil } ?? 4040
+            return runMCPServer(port: port)
+        }
+        if args.contains("--mcp-test") {
+            return mcpTest()
         }
         if args.contains("--selftest") {
             return selftest()
@@ -209,5 +225,90 @@ enum MuesliCLI {
         }
         if exitCode != 0 { exit(exitCode) }
         return true
+    }
+
+    // MARK: - MCP Server (Headless)
+
+    private static func runMCPServer(port: Int) -> Bool {
+        var failure = false
+        Task { @MainActor in
+            let settings = AppSettings()
+            settings.mcpPort = port
+            let store = MeetingStore(baseDir: settings.baseDir)
+            let service = MCPService(store: store, settings: settings, recorder: nil)
+            let server = MCPHTTPServer(
+                port: UInt16(port),
+                allowRemote: settings.mcpAllowRemote,
+                requireAuth: settings.mcpRequireAuth,
+                authToken: settings.mcpAuthToken,
+                service: service
+            )
+            do {
+                try server.start()
+                print("Muesli MCP Server listening on http://127.0.0.1:\(port)")
+                print("  SSE stream:   http://127.0.0.1:\(port)/sse")
+                print("  Direct MCP:   http://127.0.0.1:\(port)/mcp")
+                print("  OpenAPI spec: http://127.0.0.1:\(port)/openapi.json")
+            } catch {
+                print("MCP SERVER ERROR: \(error.localizedDescription)")
+                failure = true
+            }
+        }
+
+        while !failure {
+            RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.5))
+        }
+        return true
+    }
+
+    // MARK: - MCP Protocol Self-Test
+
+    private static func mcpTest() -> Bool {
+        var failures: [String] = []
+        let settings = AppSettings()
+        let store = MeetingStore(baseDir: settings.baseDir)
+        let service = MCPService(store: store, settings: settings, recorder: nil)
+
+        // 1. Tool definitions check
+        let tools = service.allTools()
+        let toolNames = tools.map(\.name)
+        let expected = ["list_meetings", "get_meeting", "search_meetings", "create_meeting", "get_recording_status", "start_recording", "stop_recording", "get_live_transcript"]
+        for e in expected {
+            if !toolNames.contains(e) { failures.append("missing tool: \(e)") }
+        }
+
+        // 2. Resource definitions check
+        let resources = service.allResources()
+        let uris = resources.map(\.uri)
+        if !uris.contains("muesli://meetings") || !uris.contains("muesli://status") {
+            failures.append("missing expected resources")
+        }
+
+        // 3. Prompt definitions check
+        let prompts = service.allPrompts()
+        let pNames = prompts.map(\.name)
+        if !pNames.contains("summarize_meeting") {
+            failures.append("missing prompt summarize_meeting")
+        }
+
+        // 4. JSON-RPC serialization & AnyCodable
+        do {
+            let req = JSONRPCRequest(id: .int(42), method: "ping", params: AnyCodable(["foo": AnyCodable("bar")]))
+            let data = try JSONEncoder().encode(req)
+            let back = try JSONDecoder().decode(JSONRPCRequest.self, from: data)
+            if back.method != "ping" || back.id != .int(42) || back.params?.dictionaryValue?["foo"]?.stringValue != "bar" {
+                failures.append("JSONRPC serialization round-trip failed")
+            }
+        } catch {
+            failures.append("JSONRPC serialization error: \(error)")
+        }
+
+        if failures.isEmpty {
+            print("MCP TEST OK")
+            return true
+        } else {
+            print("MCP TEST FAILED:\n" + failures.joined(separator: "\n"))
+            exit(1)
+        }
     }
 }
