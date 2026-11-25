@@ -351,8 +351,9 @@ private final class HTTPConnectionHandler {
 
     private func handleStatus() {
         Task {
-            let (isRec, totalMeetings) = await MainActor.run {
+            let (isRec, isPaused, totalMeetings) = await MainActor.run {
                 (self.server?.service.recorder?.isRecording ?? false,
+                 self.server?.service.recorder?.isPaused ?? false,
                  self.server?.service.store.meetings.count ?? 0)
             }
 
@@ -362,6 +363,7 @@ private final class HTTPConnectionHandler {
                 "version": AppVersion.current,
                 "total_meetings": totalMeetings,
                 "is_recording": isRec,
+                "is_paused": isPaused,
                 "mcp": [
                     "version": "2024-11-05",
                     "transports": ["sse", "http", "stdio"],

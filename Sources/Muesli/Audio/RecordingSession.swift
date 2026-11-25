@@ -31,7 +31,7 @@ final class RecordingSession {
     private var micTotalSamples = 0
     private var sysTotalSamples = 0
     private var chunkIndex = 0
-    private var stopped = false
+    private var captureID: UUID?
 
     private var micWriter: WavWriter?
     private var sysWriter: WavWriter?
@@ -54,9 +54,25 @@ final class RecordingSession {
         }
     }
 
-    func appendMic(_ samples: [Int16]) {
+    func acceptSamples(from captureID: UUID) {
+        queue.sync {
+            self.captureID = captureID
+        }
+    }
+
+    func pause() {
+        queue.sync {
+            captureID = nil
+            pendingMicLevel = 0
+            pendingSysLevel = 0
+            lastLevelPublish = .distantPast
+        }
+    }
+
+    // The ID keeps late callbacks from a previous device stream out of a resumed recording.
+    func appendMic(_ samples: [Int16], captureID: UUID) {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard self.captureID == captureID else { return }
             micChunk.append(contentsOf: samples)
             micTotalSamples += samples.count
             micWriter?.append(samples)
@@ -65,9 +81,9 @@ final class RecordingSession {
         }
     }
 
-    func appendSystem(_ samples: [Int16]) {
+    func appendSystem(_ samples: [Int16], captureID: UUID) {
         queue.async { [self] in
-            guard !stopped else { return }
+            guard self.captureID == captureID else { return }
             sysChunk.append(contentsOf: samples)
             sysTotalSamples += samples.count
             sysWriter?.append(samples)
@@ -79,15 +95,13 @@ final class RecordingSession {
     /// Stops the session, flushes the final chunk, finalizes the WAV headers,
     /// and returns the recorded duration in seconds.
     func finish() -> Double {
-        var duration: Double = 0
         queue.sync { [self] in
-            stopped = true
+            captureID = nil
             flush()
             micWriter?.finalize()
             sysWriter?.finalize()
-            duration = Double(max(micTotalSamples, sysTotalSamples)) / Double(sampleRate)
+            return Double(max(micTotalSamples, sysTotalSamples)) / Double(sampleRate)
         }
-        return duration
     }
 
     // MARK: - Chunking

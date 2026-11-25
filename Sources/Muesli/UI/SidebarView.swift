@@ -69,6 +69,7 @@ struct SidebarView: View {
                     )
                 }
                 .buttonStyle(.plain)
+                .disabled(recorder.isChangingCapture)
 
                 if !recorder.isRecording {
                     Menu {
@@ -78,6 +79,7 @@ struct SidebarView: View {
                                 if let id = recorder.recordingMeetingID { selectedMeetingID = id }
                             }
                         }
+                        .disabled(recorder.isChangingCapture)
                         Button("Nova nota sem áudio") {
                             let m = store.createMeeting()
                             selectedMeetingID = m.id
@@ -376,7 +378,7 @@ struct SidebarView: View {
         SidebarRow(
             meeting: meeting,
             isSelected: selectedMeetingID == meeting.id,
-            isRecording: recorder.recordingMeetingID == meeting.id
+            isRecording: recorder.recordingMeetingID == meeting.id && !recorder.isPaused
         ) {
             selectedMeetingID = meeting.id
         }

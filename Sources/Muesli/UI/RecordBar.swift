@@ -4,30 +4,32 @@ struct RecordBar: View {
     @EnvironmentObject private var recorder: RecordingController
 
     var body: some View {
+        let statusColor = recorder.isPaused ? CoastalTheme.secondaryText : CoastalTheme.danger
+
         HStack(spacing: 12) {
             HStack(spacing: 7) {
-                Circle()
-                    .fill(CoastalTheme.danger)
-                    .frame(width: 9, height: 9)
-                Text("Gravando")
+                Image(systemName: recorder.isPaused ? "pause.fill" : "circle.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(statusColor)
+                Text(recorder.isPaused ? "Em pausa" : "Gravando")
                     .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(CoastalTheme.danger)
+                    .foregroundStyle(statusColor)
 
-                if case .recording(_, let started) = recorder.state {
-                    TimelineView(.periodic(from: started, by: 1.0)) { context in
-                        Text(formatClock(max(0, context.date.timeIntervalSince(started))))
-                            .font(.system(size: 12.5, weight: .medium).monospacedDigit())
-                            .foregroundStyle(CoastalTheme.text)
+                Group {
+                    if case .recording(_, let started) = recorder.state {
+                        TimelineView(.periodic(from: started, by: 1.0)) { context in
+                            Text(formatClock(recorder.elapsedRecordingTime(at: context.date)))
+                        }
+                    } else {
+                        Text(formatClock(recorder.elapsedRecordingTime()))
                     }
-                } else {
-                    Text("0:00")
-                        .font(.system(size: 12.5, weight: .medium).monospacedDigit())
-                        .foregroundStyle(CoastalTheme.text)
                 }
+                .font(.system(size: 12.5, weight: .medium).monospacedDigit())
+                .foregroundStyle(CoastalTheme.text)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
-            .background(CoastalTheme.dangerSoft, in: Capsule())
+            .background(recorder.isPaused ? CoastalTheme.surfaceRaised : CoastalTheme.dangerSoft, in: Capsule())
 
             LevelMeter(label: "Eu", level: recorder.micLevel)
             LevelMeter(label: "Outros", level: recorder.sysLevel)
@@ -44,6 +46,15 @@ struct RecordBar: View {
             }
 
             Button {
+                Task { await recorder.togglePause() }
+            } label: {
+                Label(recorder.isPaused ? "Retomar" : "Pausar", systemImage: recorder.isPaused ? "play.fill" : "pause.fill")
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .buttonStyle(.bordered)
+            .disabled(recorder.isChangingCapture)
+
+            Button {
                 Task { await recorder.stop() }
             } label: {
                 Label("Parar", systemImage: "stop.fill")
@@ -55,6 +66,7 @@ struct RecordBar: View {
             }
             .buttonStyle(.plain)
             .keyboardShortcut(".", modifiers: .command)
+            .disabled(recorder.isChangingCapture)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 9)

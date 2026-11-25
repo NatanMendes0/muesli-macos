@@ -61,13 +61,18 @@ struct MuesliApp: App {
                     }
                 }
                 .keyboardShortcut("n", modifiers: .command)
-                .disabled(recorder.isRecording)
+                .disabled(recorder.isRecording || recorder.isChangingCapture)
+
+                Button(recorder.isPaused ? "Retomar gravação" : "Pausar gravação") {
+                    Task { await recorder.togglePause() }
+                }
+                .disabled(!recorder.isRecording || recorder.isChangingCapture)
 
                 Button("Parar gravação") {
                     Task { await recorder.stop() }
                 }
                 .keyboardShortcut(".", modifiers: .command)
-                .disabled(!recorder.isRecording)
+                .disabled(!recorder.isRecording || recorder.isChangingCapture)
             }
         }
 
@@ -87,7 +92,7 @@ struct MuesliApp: App {
                 .environmentObject(store)
                 .environmentObject(recorder)
         } label: {
-            Image(systemName: recorder.isRecording ? "record.circle.fill" : "waveform.circle")
+            Image(systemName: recorder.isPaused ? "pause.circle.fill" : recorder.isRecording ? "record.circle.fill" : "waveform.circle")
         }
     }
 }
@@ -142,10 +147,15 @@ struct MenuBarMenu: View {
 
     var body: some View {
         if recorder.isRecording {
-            Text("Gravando…")
+            Text(recorder.isPaused ? "Gravação em pausa" : "Gravando…")
+            Button(recorder.isPaused ? "Retomar gravação" : "Pausar gravação") {
+                Task { await recorder.togglePause() }
+            }
+            .disabled(recorder.isChangingCapture)
             Button("Parar gravação") {
                 Task { await recorder.stop() }
             }
+            .disabled(recorder.isChangingCapture)
         } else {
             Button("Iniciar gravação") {
                 Task {
@@ -153,6 +163,7 @@ struct MenuBarMenu: View {
                     if let id = recorder.recordingMeetingID { selectedMeetingID = id }
                 }
             }
+            .disabled(recorder.isChangingCapture)
         }
         Divider()
         Button("Abrir Muesli") {

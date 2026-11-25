@@ -104,23 +104,26 @@ struct SettingsView: View {
 
             Rectangle().fill(CoastalTheme.separator).frame(width: 1)
 
-            // Right content scroll area
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    switch selectedTab {
-                    case .general: GeneralSettingsTab()
-                    case .transcription: TranscriptionSettingsTab()
-                    case .ai: AISettingsTab()
-                    case .templates: TemplatesSettingsTab()
-                    case .recording: RecordingSettingsTab()
-                    case .mcp: MCPSettingsTab()
-                    case .updates: UpdatesSettingsTab()
+            GeometryReader { pane in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        switch selectedTab {
+                        case .general: GeneralSettingsTab()
+                        case .transcription: TranscriptionSettingsTab()
+                        case .ai: AISettingsTab()
+                        case .templates: TemplatesSettingsTab()
+                        case .recording: RecordingSettingsTab()
+                        case .mcp: MCPSettingsTab()
+                        case .updates: UpdatesSettingsTab()
+                        }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(22)
+                    .frame(width: pane.size.width)
                 }
-                .padding(22)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(width: pane.size.width, height: pane.size.height)
+                .background(CoastalTheme.background)
             }
-            .background(CoastalTheme.background)
         }
         .frame(width: 760, height: 580)
     }
@@ -1252,6 +1255,8 @@ private struct MCPSettingsTab: View {
     @State private var portText: String = ""
 
     var body: some View {
+        let localURL = "http://127.0.0.1:\(settings.mcpPort)"
+
         VStack(alignment: .leading, spacing: 4) {
             Text("Servidor MCP (Model Context Protocol)")
                 .font(.title3.weight(.bold))
@@ -1377,20 +1382,16 @@ private struct MCPSettingsTab: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(CoastalTheme.secondaryText)
 
-                    HStack(spacing: 8) {
-                        Group {
-                            if showToken {
-                                Text(settings.ensureMCPAuthToken())
-                            } else {
-                                Text(String(repeating: "•", count: 24))
-                            }
-                        }
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(CoastalTheme.text)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                    ScrollView(.horizontal) {
+                        Text(showToken ? settings.mcpAuthToken : String(repeating: "•", count: 24))
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundStyle(CoastalTheme.text)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                    }
+                    .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
 
+                    HStack(spacing: 8) {
                         Button {
                             showToken.toggle()
                         } label: {
@@ -1423,12 +1424,12 @@ private struct MCPSettingsTab: View {
                 .font(.system(size: 13, weight: .bold))
                 .foregroundStyle(CoastalTheme.text)
 
-            Picker("", selection: $selectedGuide) {
-                Text("Gemini Cloud & ChatGPT (Nuvem)").tag(0)
-                Text("Claude, Codex, Antigravity & Cursor (Local / stdio)").tag(1)
+            Picker("Guia", selection: $selectedGuide) {
+                Text("Nuvem (Gemini Cloud e ChatGPT)").tag(0)
+                Text("Local (stdio)").tag(1)
                 Text("Ferramentas Disponíveis").tag(2)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             if selectedGuide == 0 {
                 // Nuvem / Web (Gemini Cloud e ChatGPT)
@@ -1442,13 +1443,14 @@ private struct MCPSettingsTab: View {
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(CoastalTheme.text)
 
+                        let command = "cloudflared tunnel --url \(localURL)"
                         HStack {
-                            Text("cloudflared tunnel --url http://127.0.0.1:\(settings.mcpPort)")
+                            Text(command)
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundStyle(CoastalTheme.text)
                             Spacer()
                             Button("Copiar") {
-                                copyToClipboard("cloudflared tunnel --url http://127.0.0.1:\(settings.mcpPort)", label: "Comando copiado!")
+                                copyToClipboard(command, label: "Comando copiado!")
                             }
                             .controlSize(.mini)
                         }
@@ -1471,7 +1473,7 @@ private struct MCPSettingsTab: View {
                                 .foregroundStyle(CoastalTheme.text)
                             Spacer()
                             Button("Copiar Endpoint") {
-                                copyToClipboard("http://127.0.0.1:\(settings.mcpPort)/openapi.json", label: "Endpoint OpenAPI copiado!")
+                                copyToClipboard("\(localURL)/openapi.json", label: "Endpoint OpenAPI copiado!")
                             }
                             .controlSize(.mini)
                         }
@@ -1488,7 +1490,7 @@ private struct MCPSettingsTab: View {
                                 .foregroundStyle(CoastalTheme.text)
                             Spacer()
                             Button("Copiar SSE") {
-                                copyToClipboard("http://127.0.0.1:\(settings.mcpPort)/sse", label: "Endpoint SSE copiado!")
+                                copyToClipboard("\(localURL)/sse", label: "Endpoint SSE copiado!")
                             }
                             .controlSize(.mini)
                         }
@@ -1499,7 +1501,7 @@ private struct MCPSettingsTab: View {
             } else if selectedGuide == 1 {
                 // Local / stdio (Claude Desktop, Antigravity, Cursor, Gemini CLI)
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Adicione esta configuração ao arquivo de configuração MCP do seu editor ou cliente (ex: `claude_desktop_config.json`, `mcp.json` ou Antigravity):")
+                    Text("Adicione este JSON ao arquivo de configuração MCP do seu cliente, como Claude Desktop, Codex, Antigravity ou Cursor (por exemplo, `claude_desktop_config.json` ou `mcp.json`).")
                         .font(.system(size: 12))
                         .foregroundStyle(CoastalTheme.bodyText)
 
@@ -1516,15 +1518,17 @@ private struct MCPSettingsTab: View {
                     """
 
                     VStack(alignment: .trailing, spacing: 6) {
-                        Text(stdioJSON)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(CoastalTheme.text)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(10)
-                            .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
+                        ScrollView(.horizontal) {
+                            Text(stdioJSON)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundStyle(CoastalTheme.text)
+                                .fixedSize()
+                                .padding(10)
+                        }
+                        .background(CoastalTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: 6))
 
                         HStack {
-                            Text("Ou conecte via SSE local: `http://127.0.0.1:\(settings.mcpPort)/sse`")
+                            Text("Ou conecte via SSE local: `\(localURL)/sse`")
                                 .font(.caption2)
                                 .foregroundStyle(CoastalTheme.faintText)
                             Spacer()
@@ -1560,22 +1564,19 @@ private struct MCPSettingsTab: View {
                         ("get_live_transcript", "Lê o texto transcrito em tempo real durante a gravação.")
                     ]
 
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(toolList, id: \.0) { tool in
-                                HStack(alignment: .top, spacing: 6) {
-                                    Text("`\(tool.0)`")
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .foregroundStyle(CoastalTheme.accent)
-                                        .frame(width: 150, alignment: .leading)
-                                    Text(tool.1)
-                                        .font(.caption)
-                                        .foregroundStyle(CoastalTheme.bodyText)
-                                }
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(toolList, id: \.0) { tool in
+                            HStack(alignment: .top, spacing: 6) {
+                                Text("`\(tool.0)`")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundStyle(CoastalTheme.accent)
+                                    .frame(width: 150, alignment: .leading)
+                                Text(tool.1)
+                                    .font(.caption)
+                                    .foregroundStyle(CoastalTheme.bodyText)
                             }
                         }
                     }
-                    .frame(maxHeight: 180)
                 }
             }
 

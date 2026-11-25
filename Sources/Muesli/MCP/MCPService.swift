@@ -701,6 +701,7 @@ final class MCPService {
             return toJSONString([
                 "app_running": false,
                 "is_recording": false,
+                "is_paused": false,
                 "message": "O controlador de gravação não está ativo nesta instância."
             ])
         }
@@ -709,6 +710,7 @@ final class MCPService {
         var dict: [String: Any] = [
             "app_running": true,
             "is_recording": isRec,
+            "is_paused": recorder.isPaused,
             "mic_level": recorder.micLevel,
             "system_level": recorder.sysLevel,
             "pending_chunks": recorder.pendingChunks
@@ -717,7 +719,7 @@ final class MCPService {
         if isRec, let meetingID = recorder.recordingMeetingID, let meeting = store.meeting(meetingID) {
             dict["meeting_id"] = meeting.id.uuidString
             dict["meeting_title"] = meeting.title
-            dict["meeting_duration"] = formatClock(meeting.durationSeconds)
+            dict["meeting_duration"] = formatClock(recorder.elapsedRecordingTime())
             dict["transcript_segment_count"] = meeting.transcript.count
         }
 
@@ -729,7 +731,7 @@ final class MCPService {
             throw NSError(domain: "MuesliMCP", code: 503, userInfo: [NSLocalizedDescriptionKey: "O aplicativo Muesli deve estar aberto para gravar áudio com microfone e sistema."])
         }
 
-        if recorder.isRecording {
+        if recorder.isRecording || recorder.isChangingCapture {
             throw NSError(domain: "MuesliMCP", code: 409, userInfo: [NSLocalizedDescriptionKey: "Já existe uma gravação em andamento no Muesli."])
         }
 
@@ -744,6 +746,11 @@ final class MCPService {
 
         let meeting = store.createMeeting(title: title, categoryID: catID)
         await recorder.start(meetingID: meeting.id, captureSystemAudio: captureSys)
+        guard recorder.recordingMeetingID == meeting.id else {
+            throw NSError(domain: "MuesliMCP", code: 500, userInfo: [
+                NSLocalizedDescriptionKey: recorder.lastError ?? "Não foi possível iniciar a gravação."
+            ])
+        }
 
         return toJSONString([
             "message": "Gravação iniciada com sucesso.",
@@ -755,6 +762,10 @@ final class MCPService {
     private func executeStopRecording() async throws -> String {
         guard let recorder else {
             throw NSError(domain: "MuesliMCP", code: 503, userInfo: [NSLocalizedDescriptionKey: "O aplicativo Muesli deve estar aberto."])
+        }
+
+        guard !recorder.isChangingCapture else {
+            throw NSError(domain: "MuesliMCP", code: 409, userInfo: [NSLocalizedDescriptionKey: "A gravação está mudando de estado. Tente novamente em instantes."])
         }
 
         guard recorder.isRecording else {
@@ -851,8 +862,9 @@ final class MCPService {
             md += "- **Total de Reuniões:** \(store.meetings.count)\n"
             md += "- **Categorias:** \(store.categories.count)\n"
             md += "- **Gravação Ativa:** \(isRec ? "Sim" : "Não")\n"
-            if isRec, let meetingID = recorder?.recordingMeetingID, let m = store.meeting(meetingID) {
-                md += "- **Reunião Atual:** \(m.title) (\(formatClock(m.durationSeconds)))\n"
+            if let recorder, let meetingID = recorder.recordingMeetingID, let m = store.meeting(meetingID) {
+                if recorder.isPaused { md += "- **Estado da Gravação:** Em pausa\n" }
+                md += "- **Reunião Atual:** \(m.title) (\(formatClock(recorder.elapsedRecordingTime())))\n"
             }
             md += "- **Diretório:** `\(store.meetingsDir.path)`\n"
 

@@ -46,6 +46,61 @@ import AVFoundation
     }
 }
 
+@Suite struct RecordingSessionTests {
+    @Test(arguments: [false, true])
+    func pauseKeepsOnlyAudioFromActiveCapture(resume: Bool) throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-recording-test-\(UUID().uuidString)")
+        let session = try RecordingSession(meetingID: UUID(), folder: folder, chunkSeconds: 20, captureSystem: true)
+        var jobs: [TranscriptionJob] = []
+        session.onChunk = { jobs.append($0) }
+        defer {
+            try? FileManager.default.removeItem(at: folder)
+            for job in jobs {
+                for url in [job.micURL, job.sysURL].compactMap({ $0 }) {
+                    try? FileManager.default.removeItem(at: url)
+                }
+            }
+        }
+
+        let initialCapture = UUID()
+        let resumedCapture = UUID()
+        let beforePause = [Int16](repeating: 500, count: 32000)
+        let duringPause = [Int16](repeating: 1500, count: 16000)
+        let afterPause = [Int16](repeating: 2500, count: 16000)
+        session.acceptSamples(from: initialCapture)
+        session.appendMic(beforePause, captureID: initialCapture)
+        session.appendSystem(beforePause, captureID: initialCapture)
+
+        session.pause()
+        session.appendMic(duringPause, captureID: initialCapture)
+        session.appendSystem(duringPause, captureID: resumedCapture)
+
+        if resume {
+            session.acceptSamples(from: resumedCapture)
+            session.appendMic(duringPause, captureID: initialCapture)
+            session.appendSystem(duringPause, captureID: initialCapture)
+            session.appendMic(afterPause, captureID: resumedCapture)
+            session.appendSystem(afterPause, captureID: resumedCapture)
+        }
+
+        let duration = session.finish()
+        #expect(duration == (resume ? 3 : 2))
+        let job = try #require(jobs.first)
+        #expect(jobs.count == 1)
+        #expect(job.micStart == 0)
+        #expect(job.sysStart == 0)
+        let expected = resume ? beforePause + afterPause : beforePause
+        let micChunk = try #require(job.micURL)
+        let systemChunk = try #require(job.sysURL)
+        for url in [session.micFileURL, session.systemFileURL, micChunk, systemChunk] {
+            let wav = try Data(contentsOf: url)
+            let payload = wav.dropFirst(44).withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+            #expect(payload == expected)
+        }
+    }
+}
+
 @Suite struct WhisperParsingTests {
     @Test func parsesSegmentsAndFiltersArtifacts() throws {
         let json = """

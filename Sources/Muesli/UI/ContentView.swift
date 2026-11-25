@@ -146,7 +146,7 @@ struct ContentView: View {
     }
 
     private var consentNoticeText: String? {
-        guard recorder.isRecording else { return nil }
+        guard recorder.isRecording, !recorder.isPaused else { return nil }
         let s = settings.consentSnippet.trimmingCharacters(in: .whitespacesAndNewlines)
         let provider = settings.hasAIConfigured ? settings.resolvedActiveProvider() : nil
         let openAIHost = URLComponents(string: settings.openAIBaseURL)?.host?.lowercased()

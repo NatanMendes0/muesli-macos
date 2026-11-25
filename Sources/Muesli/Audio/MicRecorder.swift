@@ -35,6 +35,7 @@ enum MicError: LocalizedError {
 /// Buffer routing is guarded by generation tokens so an abandoned or stale
 /// engine can never leak samples into the live stream.
 final class MicRecorder {
+    private let engineLock = NSLock()
     private var engine: AVAudioEngine?
     private var converter = StreamConverter()
     private(set) var voiceProcessingActive = false
@@ -84,12 +85,18 @@ final class MicRecorder {
 
     func stop() {
         stopped.value = true
-        tearDownEngine()
+        engineLock.withLock {
+            tearDownEngine()
+        }
     }
 
     // MARK: - Raw engine
 
     private func startRawEngine() throws {
+        // Serialize device restarts with stop so a paused recording releases the mic.
+        engineLock.lock()
+        defer { engineLock.unlock() }
+        guard !stopped.value else { return }
         tearDownEngine()
 
         let gen = genCounter.next()

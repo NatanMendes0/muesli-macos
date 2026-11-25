@@ -8,9 +8,11 @@ final class RecordingController: ObservableObject {
     enum State: Equatable {
         case idle
         case recording(meetingID: UUID, started: Date)
+        case paused(meetingID: UUID, elapsed: TimeInterval)
     }
 
     @Published private(set) var state: State = .idle
+    @Published private(set) var isChangingCapture = false
     @Published var micLevel: Float = 0
     @Published var sysLevel: Float = 0
     @Published var pendingChunks: Int = 0
@@ -33,17 +35,32 @@ final class RecordingController: ObservableObject {
     private var session: RecordingSession?
     private var mic: MicRecorder?
     private var system: SystemAudioRecorder?
+    private var captureSystemAudio = false
 
     static private(set) weak var shared: RecordingController?
 
     var isRecording: Bool {
-        if case .recording = state { return true }
+        recordingMeetingID != nil
+    }
+
+    var isPaused: Bool {
+        if case .paused = state { return true }
         return false
     }
 
     var recordingMeetingID: UUID? {
-        if case .recording(let id, _) = state { return id }
-        return nil
+        switch state {
+        case .recording(let id, _), .paused(let id, _): return id
+        case .idle: return nil
+        }
+    }
+
+    func elapsedRecordingTime(at date: Date = .now) -> TimeInterval {
+        switch state {
+        case .recording(_, let started): return max(0, date.timeIntervalSince(started))
+        case .paused(_, let elapsed): return elapsed
+        case .idle: return 0
+        }
     }
 
     init(store: MeetingStore, settings: AppSettings) {
@@ -69,19 +86,22 @@ final class RecordingController: ObservableObject {
         )
     }
 
-    // MARK: - Start / stop
+    // MARK: - Recording controls
 
     /// Creates a meeting and starts recording into it.
     @discardableResult
     func startNewMeeting(captureSystemAudio: Bool? = nil, categoryID: UUID? = nil) async -> UUID? {
-        guard !isRecording else { return nil }
+        guard !isRecording, !isChangingCapture else { return nil }
         let meeting = store.createMeeting(categoryID: categoryID)
         await start(meetingID: meeting.id, captureSystemAudio: captureSystemAudio)
         return meeting.id
     }
 
     func start(meetingID: UUID, captureSystemAudio: Bool? = nil) async {
-        guard !isRecording, let meeting = store.meeting(meetingID) else { return }
+        guard !isRecording, !isChangingCapture, let meeting = store.meeting(meetingID) else { return }
+        isChangingCapture = true
+        defer { isChangingCapture = false }
+
         lastError = nil
         systemAudioWarning = nil
         micWarning = nil
@@ -91,7 +111,7 @@ final class RecordingController: ObservableObject {
             return
         }
 
-        let wantSystem = captureSystemAudio ?? settings.captureSystemAudio
+        self.captureSystemAudio = captureSystemAudio ?? settings.captureSystemAudio
         let folder = store.folder(for: meeting)
 
         do {
@@ -99,64 +119,72 @@ final class RecordingController: ObservableObject {
                 meetingID: meeting.id,
                 folder: folder,
                 chunkSeconds: settings.effectiveChunkSeconds,
-                captureSystem: wantSystem
+                captureSystem: self.captureSystemAudio
             )
             session.onChunk = { [pipeline] job in
                 Task { await pipeline?.enqueue(job) }
             }
             session.onLevels = { [weak self] micLevel, sysLevel in
                 Task { @MainActor in
-                    self?.micLevel = micLevel
-                    self?.sysLevel = sysLevel
+                    guard let self, self.recordingMeetingID == meetingID, !self.isPaused else { return }
+                    self.micLevel = micLevel
+                    self.sysLevel = sysLevel
                 }
             }
             self.session = session
 
-            // Mic first: a voice-processing attempt may take a few seconds once,
-            // and toggling it reconfigures the input device — get the mic settled
-            // before system audio starts so the two stream timelines stay aligned.
-            let mic = MicRecorder()
-            mic.onSamples = { [weak session] in session?.appendMic($0) }
-            mic.onNotice = { [weak self] message in
-                Task { @MainActor in self?.micWarning = message }
-            }
-            mic.onVoiceProcessingFailed = { [weak self] in
-                Task { @MainActor in self?.settings.vpKnownBad = true }
-            }
-            try await mic.start(echoCancellation: settings.echoCancellation && !settings.vpKnownBad)
-            self.mic = mic
-
-            if wantSystem {
-                let sys = SystemAudioRecorder()
-                sys.onSamples = { [weak session] in session?.appendSystem($0) }
-                sys.onStoppedWithError = { [weak self] error in
-                    Task { @MainActor in
-                        self?.systemAudioWarning = "System audio stopped: \(error.localizedDescription)"
-                    }
-                }
-                do {
-                    try await sys.start()
-                    self.system = sys
-                } catch {
-                    systemAudioWarning = (error as? SystemAudioError)?.errorDescription
-                        ?? "System audio unavailable (\(error.localizedDescription)) — recording your mic only."
-                }
-            }
-
+            let captureID = UUID()
+            session.acceptSamples(from: captureID)
+            try await startCapture(in: session, captureID: captureID)
             state = .recording(meetingID: meeting.id, started: Date())
         } catch {
-            await teardownCapture()
+            await stopCapture()
+            session = nil
             lastError = "Couldn't start recording: \(error.localizedDescription)"
         }
     }
 
+    func togglePause() async {
+        guard !isChangingCapture, let session else { return }
+        isChangingCapture = true
+        defer { isChangingCapture = false }
+
+        switch state {
+        case .recording(let meetingID, _):
+            let elapsed = elapsedRecordingTime()
+            session.pause()
+            state = .paused(meetingID: meetingID, elapsed: elapsed)
+            micLevel = 0
+            sysLevel = 0
+            await stopCapture()
+        case .paused(let meetingID, let elapsed):
+            lastError = nil
+            systemAudioWarning = nil
+            micWarning = nil
+            let captureID = UUID()
+            do {
+                try await startCapture(in: session, captureID: captureID)
+                session.acceptSamples(from: captureID)
+                state = .recording(meetingID: meetingID, started: Date().addingTimeInterval(-elapsed))
+            } catch {
+                await stopCapture()
+                lastError = "Não foi possível retomar a gravação: \(error.localizedDescription)"
+            }
+        case .idle:
+            break
+        }
+    }
+
     func stop() async {
-        guard case .recording(let meetingID, let started) = state else { return }
-        mic?.stop()
-        await system?.stop()
-        let duration = session?.finish() ?? Date().timeIntervalSince(started)
-        store.setDuration(meetingID, seconds: max(duration, Date().timeIntervalSince(started)))
-        await teardownCapture()
+        guard !isChangingCapture, let meetingID = recordingMeetingID else { return }
+        isChangingCapture = true
+        defer { isChangingCapture = false }
+
+        await stopCapture()
+        let elapsed = elapsedRecordingTime()
+        let duration = session?.finish() ?? elapsed
+        store.setDuration(meetingID, seconds: max(duration, elapsed))
+        session = nil
         state = .idle
         micLevel = 0
         sysLevel = 0
@@ -224,10 +252,42 @@ final class RecordingController: ObservableObject {
         Thread.sleep(forTimeInterval: 0.4)
     }
 
-    private func teardownCapture() async {
+    private func startCapture(in session: RecordingSession, captureID: UUID) async throws {
+        // Settle the mic before starting system audio so the timelines stay aligned.
+        let mic = MicRecorder()
+        mic.onSamples = { [weak session] in session?.appendMic($0, captureID: captureID) }
+        mic.onNotice = { [weak self] message in
+            Task { @MainActor in self?.micWarning = message }
+        }
+        mic.onVoiceProcessingFailed = { [weak self] in
+            Task { @MainActor in self?.settings.vpKnownBad = true }
+        }
+        try await mic.start(echoCancellation: settings.echoCancellation && !settings.vpKnownBad)
+        self.mic = mic
+
+        if captureSystemAudio {
+            let sys = SystemAudioRecorder()
+            sys.onSamples = { [weak session] in session?.appendSystem($0, captureID: captureID) }
+            sys.onStoppedWithError = { [weak self] error in
+                Task { @MainActor in
+                    self?.systemAudioWarning = "System audio stopped: \(error.localizedDescription)"
+                }
+            }
+            do {
+                try await sys.start()
+                self.system = sys
+            } catch {
+                systemAudioWarning = (error as? SystemAudioError)?.errorDescription
+                    ?? "System audio unavailable (\(error.localizedDescription)) — recording your mic only."
+            }
+        }
+    }
+
+    private func stopCapture() async {
+        mic?.stop()
+        await system?.stop()
         mic = nil
         system = nil
-        session = nil
     }
 
     // MARK: - Retranscribe
