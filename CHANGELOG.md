@@ -2,6 +2,18 @@
 
 Todas as mudanças notáveis de cada versão do Muesli para macOS são documentadas aqui e publicadas automaticamente nas Releases do GitHub.
 
+## v1.5.1
+
+### Português
+- **Pausa e retomada de gravações:** pause a captura do microfone e do áudio do sistema e retome na mesma reunião. O tempo em pausa fica fora da duração gravada.
+- **Configurações do servidor MCP:** corrigido o corte do conteúdo nas laterais da janela e adicionado um menu para selecionar o guia de conexão.
+- **Status de gravação no MCP:** os clientes agora podem identificar quando uma gravação está em pausa e consultar a duração atual.
+
+### English
+- **Pause and resume recordings:** pause microphone and system audio capture and resume in the same meeting. Paused time is excluded from the recording duration.
+- **MCP server settings:** fixed content clipping at the edges of the window and added a menu for selecting a connection guide.
+- **MCP recording status:** clients can now detect when a recording is paused and read its current duration.
+
 ## v1.5.0
 
 ### Português
